@@ -40,3 +40,16 @@ def test_rejects_non_csv(tmp_path: Path):
         assert "CSV" in str(error)
     else:
         raise AssertionError("Un fichier non CSV doit être refusé")
+
+
+def test_imports_a_tab_separated_research_table(tmp_path: Path):
+    service = CsvUploadService(tmp_path, 1024 * 1024, MemoryRepository())
+
+    body = service.import_tabular(
+        "communes.tab",
+        BytesIO(b"code\tpopulation\n01001\t806\n"),
+    )
+
+    assert body["row_count"] == 1
+    assert body["original_name"] == "communes.tab"
+    assert [column["name"] for column in body["columns"]] == ["code", "population"]

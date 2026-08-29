@@ -21,8 +21,15 @@ class CsvUploadService:
         if not original_name.lower().endswith(".csv"):
             raise ValueError("Seuls les fichiers CSV sont acceptés.")
 
+        return self.import_tabular(original_name, stream)
+
+    def import_tabular(self, original_name: str, stream: BinaryIO) -> dict:
+        suffix = Path(original_name).suffix.lower()
+        if suffix not in {".csv", ".tsv", ".tab"}:
+            raise ValueError("Seules les tables CSV et TSV sont acceptées.")
+
         dataset_id = str(uuid4())
-        stored_name = f"{dataset_id}.csv"
+        stored_name = f"{dataset_id}{suffix}"
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         destination = self.upload_dir / stored_name
         digest = sha256()

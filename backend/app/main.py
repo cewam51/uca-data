@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .catalog_importer import (
     CatalogResourceError,
+    import_best_data_europa_resource,
     import_best_data_gouv_resource,
+    import_best_research_data_gouv_resource,
     import_data_gouv_resource,
 )
 from .catalogs import search_catalogs
@@ -77,6 +79,40 @@ def explore_best_data_gouv_resource(
 ) -> dict:
     try:
         return import_best_data_gouv_resource(dataset_id, service)
+    except UploadTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except CatalogResourceError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="La plateforme source ne répond pas correctement.") from error
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="Ces données n’ont pas pu être analysées.") from error
+
+
+@app.post("/api/catalogs/data-europa/explore", status_code=201)
+def explore_best_data_europa_resource(
+    dataset_id: str = Query(min_length=1, max_length=500),
+    service: CsvUploadService = Depends(get_service),
+) -> dict:
+    try:
+        return import_best_data_europa_resource(dataset_id, service)
+    except UploadTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except CatalogResourceError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="La plateforme source ne répond pas correctement.") from error
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="Ces données n’ont pas pu être analysées.") from error
+
+
+@app.post("/api/catalogs/recherche-data-gouv/explore", status_code=201)
+def explore_best_research_data_gouv_resource(
+    persistent_id: str = Query(min_length=5, max_length=500),
+    service: CsvUploadService = Depends(get_service),
+) -> dict:
+    try:
+        return import_best_research_data_gouv_resource(persistent_id, service)
     except UploadTooLargeError as error:
         raise HTTPException(status_code=413, detail=str(error)) from error
     except CatalogResourceError as error:

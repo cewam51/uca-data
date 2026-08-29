@@ -2,6 +2,7 @@ import asyncio
 import html
 import re
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlparse
 
 import httpx
 
@@ -32,7 +33,17 @@ async def search_catalogs(query: str, limit: int = 6) -> dict[str, Any]:
         results.extend(response)
         sources.append({"name": name, "status": "ok", "count": len(response)})
 
-    return {"query": query, "total": len(results), "sources": sources, "results": results}
+    results.sort(
+        key=lambda item: (bool(item.get("can_explore")), bool(item.get("can_check"))),
+        reverse=True,
+    )
+    return {
+        "query": query,
+        "total": len(results),
+        "usable_total": sum(bool(item.get("can_explore")) for item in results),
+        "sources": sources,
+        "results": results,
+    }
 
 
 async def search_data_gouv(client: httpx.AsyncClient, query: str, limit: int) -> list[dict[str, Any]]:
@@ -63,7 +74,10 @@ async def search_data_europa(client: httpx.AsyncClient, query: str, limit: int) 
             "license": None,
             "url": item.get("resource"),
             "resources": [_europa_resource(resource) for resource in item.get("distributions", [])[:12]],
-            "can_explore": False,
+            "can_explore": any(
+                resource["can_explore"]
+                for resource in map(_europa_resource, item.get("distributions", []))
+            ),
         }
         for item in datasets
     ]
@@ -78,22 +92,47 @@ async def search_recherche_data_gouv(
     )
     response.raise_for_status()
     datasets = response.json().get("data", {}).get("items", [])
-    return [
-        {
-            "id": str(item.get("global_id") or item.get("url")),
-            "source": "Recherche Data Gouv",
-            "title": item.get("name") or "Jeu de données sans titre",
-            "description": _plain_text(item.get("description")),
-            "publisher": item.get("publisher") or "Producteur non précisé",
-            "updated_at": item.get("updatedAt") or item.get("published_at"),
-            "formats": ["Données de recherche"],
-            "license": None,
-            "url": item.get("url"),
-            "resources": [],
-            "can_explore": False,
-        }
-        for item in datasets
-    ]
+    return list(
+        await asyncio.gather(
+            *(_research_data_gouv_result(client, item) for item in datasets)
+        )
+    )
+
+
+async def _research_data_gouv_result(
+    client: httpx.AsyncClient,
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    persistent_id = str(item.get("global_id") or item.get("url"))
+    resources: list[dict[str, Any]] = []
+    metadata_checked = False
+    if item.get("fileCount") and persistent_id.lower().startswith("doi:"):
+        try:
+            response = await client.get(
+                "https://entrepot.recherche.data.gouv.fr/api/datasets/:persistentId/",
+                params={"persistentId": persistent_id},
+            )
+            if response.is_success:
+                metadata_checked = True
+                resources = _research_data_gouv_resources(response.json())
+        except httpx.HTTPError:
+            pass
+
+    return {
+        "id": persistent_id,
+        "source": "Recherche Data Gouv",
+        "title": item.get("name") or "Jeu de données sans titre",
+        "description": _plain_text(item.get("description")),
+        "publisher": item.get("publisher") or "Producteur non précisé",
+        "updated_at": item.get("updatedAt") or item.get("published_at"),
+        "formats": sorted({resource["format"] for resource in resources})
+        or (["Fichiers à vérifier"] if item.get("fileCount") and not metadata_checked else ["Aucune table"]),
+        "license": None,
+        "url": item.get("url"),
+        "resources": resources,
+        "can_explore": bool(resources),
+        "can_check": bool(item.get("fileCount")) and not metadata_checked,
+    }
 
 
 def _data_gouv_result(item: dict[str, Any]) -> dict[str, Any]:
@@ -135,17 +174,55 @@ def _europa_resource(resource: dict[str, Any]) -> dict[str, Any]:
     value = resource.get("format")
     if isinstance(value, dict):
         value = value.get("label") or value.get("id")
-    access_url = resource.get("access_url") or resource.get("download_url") or []
-    if isinstance(access_url, str):
-        access_url = [access_url]
+    resource_urls = resource.get("download_url") or resource.get("access_url") or []
+    if isinstance(resource_urls, str):
+        resource_urls = [resource_urls]
+    resource_format = str(value or "").upper()
     return {
         "id": resource.get("id"),
         "title": _localized(resource.get("title")) or "Ressource",
-        "format": str(value or "").upper(),
-        "url": access_url[0] if access_url else None,
+        "format": resource_format,
+        "url": resource_urls[0] if resource_urls else None,
         "size": resource.get("byte_size"),
-        "can_explore": False,
+        "can_explore": (
+            resource_format in {"CSV", "TSV", "TAB"}
+            and bool(resource_urls)
+            and not _is_data_europa_landing_page(resource_urls[0])
+        ),
     }
+
+
+def _research_data_gouv_resources(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    resources: list[dict[str, Any]] = []
+    files = (metadata.get("data") or {}).get("latestVersion", {}).get("files", [])
+    for file_entry in files:
+        if file_entry.get("restricted") is True:
+            continue
+        data_file = file_entry.get("dataFile") or {}
+        filename = str(data_file.get("filename") or "")
+        content_type = str(data_file.get("contentType") or "").lower()
+        if content_type == "text/csv" or filename.lower().endswith(".csv"):
+            resource_format = "CSV"
+        elif content_type == "text/tab-separated-values" or filename.lower().endswith((".tsv", ".tab")):
+            resource_format = "TSV"
+        else:
+            continue
+        resources.append(
+            {
+                "id": str(data_file.get("id")),
+                "title": filename or "Table de recherche",
+                "format": resource_format,
+                "url": None,
+                "size": data_file.get("filesize"),
+                "can_explore": True,
+            }
+        )
+    return resources
+
+
+def _is_data_europa_landing_page(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.hostname in {"data.europa.eu", "www.data.europa.eu"} and "/dataset/" in parsed.path
 
 
 def _localized(value: Any) -> str:

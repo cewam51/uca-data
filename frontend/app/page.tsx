@@ -13,11 +13,13 @@ type SearchResult = {
   license: string | null;
   url: string | null;
   can_explore: boolean;
+  can_check?: boolean;
 };
 
 type SearchResponse = {
   query: string;
   total: number;
+  usable_total: number;
   sources: { name: string; status: "ok" | "unavailable"; count: number }[];
   results: SearchResult[];
 };
@@ -31,6 +33,7 @@ type Dataset = {
   row_count: number;
   columns: Column[];
   preview: Record<string, unknown>[];
+  catalog_source: string;
 };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -69,14 +72,21 @@ export default function Home() {
   }
 
   async function explore(result: SearchResult) {
-    if (result.source !== "data.gouv.fr") return;
-    setExploring(result.id);
+    const key = `${result.source}:${result.id}`;
+    let endpoint: string;
+    if (result.source === "data.gouv.fr") {
+      endpoint = `${apiUrl}/api/catalogs/data-gouv/${encodeURIComponent(result.id)}/explore`;
+    } else if (result.source === "data.europa.eu") {
+      endpoint = `${apiUrl}/api/catalogs/data-europa/explore?dataset_id=${encodeURIComponent(result.id)}`;
+    } else if (result.source === "Recherche Data Gouv") {
+      endpoint = `${apiUrl}/api/catalogs/recherche-data-gouv/explore?persistent_id=${encodeURIComponent(result.id)}`;
+    } else {
+      return;
+    }
+    setExploring(key);
     setError("");
     try {
-      const response = await fetch(
-        `${apiUrl}/api/catalogs/data-gouv/${encodeURIComponent(result.id)}/explore`,
-        { method: "POST" },
-      );
+      const response = await fetch(endpoint, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail ?? "Cette ressource ne peut pas être explorée.");
       setDataset(body);
@@ -152,7 +162,7 @@ function SearchResults({
       <div className="results-heading">
         <div>
           <p className="eyebrow">Résultats</p>
-          <h2>{search.total} jeux de données pour « {search.query} »</h2>
+          <h2>{search.usable_total} jeux utilisables sur {search.total} résultats pour « {search.query} »</h2>
         </div>
         <div className="source-status">
           {search.sources.map((source) => (
@@ -180,6 +190,7 @@ function ResultCard({
   exploring: string;
   onExplore: (result: SearchResult) => void;
 }) {
+  const key = `${result.source}:${result.id}`;
   return (
     <article className="result-card">
       <div className="card-topline">
@@ -195,14 +206,18 @@ function ResultCard({
       </div>
 
       <div className="card-actions">
-        {result.source === "data.gouv.fr" && result.can_explore ? (
-          <button onClick={() => onExplore(result)} disabled={exploring === result.id}>
-            {exploring === result.id ? "Préparation des données…" : "Utiliser ces données"}
+        {result.can_explore || result.can_check ? (
+          <button onClick={() => onExplore(result)} disabled={exploring === key}>
+            {exploring === key
+              ? "Préparation des données…"
+              : result.can_check
+                ? "Vérifier et utiliser"
+                : "Utiliser ces données"}
           </button>
-        ) : result.url ? (
-          <a className="source-link" href={result.url} target="_blank" rel="noreferrer">Consulter sur la plateforme ↗</a>
-        ) : null}
-        {result.url && result.can_explore && <a href={result.url} target="_blank" rel="noreferrer">Détails de la source ↗</a>}
+        ) : (
+          <span className="unavailable-note">Pas de table publique compatible détectée</span>
+        )}
+        {result.url && <a href={result.url} target="_blank" rel="noreferrer">Voir la fiche source ↗</a>}
       </div>
     </article>
   );
@@ -218,7 +233,7 @@ function DatasetResult({ dataset }: { dataset: Dataset }) {
         <div><span>Lignes</span><strong>{dataset.row_count.toLocaleString("fr-FR")}</strong></div>
         <div><span>Colonnes</span><strong>{dataset.columns.length}</strong></div>
         <div><span>Taille</span><strong>{formatSize(dataset.size_bytes)}</strong></div>
-        <div><span>Origine</span><strong>data.gouv.fr</strong></div>
+        <div><span>Origine</span><strong>{dataset.catalog_source}</strong></div>
       </div>
       <div className="hash"><span>Empreinte SHA-256</span><code>{dataset.sha256}</code></div>
 
