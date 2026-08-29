@@ -21,36 +21,88 @@ def import_data_gouv_resource(
     timeout = httpx.Timeout(20, connect=5)
     headers = {"User-Agent": "public-data-explorer/0.1"}
     with httpx.Client(timeout=timeout, headers=headers) as client:
-        metadata = client.get(f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/")
-        metadata.raise_for_status()
-        resources = metadata.json().get("resources", [])
+        resources = _get_data_gouv_resources(client, dataset_id)
         resource = next((item for item in resources if item.get("id") == resource_id), None)
         if resource is None:
             raise CatalogResourceError("Cette ressource n’existe plus dans le catalogue.")
-        if str(resource.get("format") or "").upper() != "CSV":
-            raise CatalogResourceError("Seules les ressources CSV peuvent être explorées pour le moment.")
-        source_url = resource.get("url")
-        if not source_url:
-            raise CatalogResourceError("Cette ressource ne possède pas d’adresse de téléchargement.")
+        result = _download_and_import(client, dataset_id, resource, service)
 
-        with closing(_open_safe_stream(client, source_url)) as response:
-            response.raise_for_status()
-            declared_size = int(response.headers.get("content-length") or 0)
-            if declared_size > service.max_upload_bytes:
-                raise UploadTooLargeError("Cette ressource dépasse la taille maximale autorisée.")
+    return result
 
-            with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as temporary:
-                downloaded = 0
-                for chunk in response.iter_bytes(1024 * 1024):
-                    downloaded += len(chunk)
-                    if downloaded > service.max_upload_bytes:
-                        raise UploadTooLargeError("Cette ressource dépasse la taille maximale autorisée.")
-                    temporary.write(chunk)
-                temporary.seek(0)
-                name = resource.get("filename") or resource.get("title") or f"{resource_id}.csv"
-                if not str(name).lower().endswith(".csv"):
-                    name = f"{name}.csv"
-                result = service.import_csv(str(name), temporary)
+
+def import_best_data_gouv_resource(dataset_id: str, service: CsvUploadService) -> dict:
+    """Choisit automatiquement la ressource CSV la plus pertinente et disponible."""
+    timeout = httpx.Timeout(30, connect=5)
+    headers = {"User-Agent": "public-data-explorer/0.1"}
+    with httpx.Client(timeout=timeout, headers=headers) as client:
+        resources = _get_data_gouv_resources(client, dataset_id)
+        resource = _select_best_data_gouv_resource(resources)
+        return _download_and_import(client, dataset_id, resource, service)
+
+
+def _select_best_data_gouv_resource(resources: list[dict]) -> dict:
+    candidates = [
+        resource
+        for resource in resources
+        if str(resource.get("format") or "").upper() == "CSV"
+        and resource.get("url")
+        and (resource.get("extras") or {}).get("check:available") is not False
+    ]
+    if not candidates:
+        raise CatalogResourceError("Aucune ressource tabulaire disponible n’a été trouvée pour ce jeu de données.")
+    candidates.sort(
+        key=lambda resource: (
+            resource.get("type") == "main",
+            resource.get("last_modified") or resource.get("created_at") or "",
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _get_data_gouv_resources(client: httpx.Client, dataset_id: str) -> list[dict]:
+    metadata = client.get(f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/")
+    metadata.raise_for_status()
+    return metadata.json().get("resources", [])
+
+
+def _download_and_import(
+    client: httpx.Client,
+    dataset_id: str,
+    resource: dict,
+    service: CsvUploadService,
+) -> dict:
+    resource_id = resource.get("id")
+    if str(resource.get("format") or "").upper() != "CSV":
+        raise CatalogResourceError("Aucune donnée tabulaire directement exploitable n’a été trouvée.")
+    source_url = resource.get("url")
+    if not source_url:
+        raise CatalogResourceError("La plateforme ne fournit pas d’adresse de téléchargement.")
+
+    with closing(_open_safe_stream(client, source_url)) as response:
+        response.raise_for_status()
+        declared_size = int(response.headers.get("content-length") or 0)
+        if declared_size > service.max_upload_bytes:
+            limit_mb = service.max_upload_bytes // (1024 * 1024)
+            raise UploadTooLargeError(
+                f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
+            )
+
+        with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as temporary:
+            downloaded = 0
+            for chunk in response.iter_bytes(1024 * 1024):
+                downloaded += len(chunk)
+                if downloaded > service.max_upload_bytes:
+                    limit_mb = service.max_upload_bytes // (1024 * 1024)
+                    raise UploadTooLargeError(
+                        f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
+                    )
+                temporary.write(chunk)
+            temporary.seek(0)
+            name = resource.get("filename") or resource.get("title") or f"{resource_id}.csv"
+            if not str(name).lower().endswith(".csv"):
+                name = f"{name}.csv"
+            result = service.import_csv(str(name), temporary)
 
     result["catalog_source"] = "data.gouv.fr"
     result["catalog_dataset_id"] = dataset_id

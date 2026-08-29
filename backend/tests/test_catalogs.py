@@ -3,7 +3,11 @@ import asyncio
 import httpx
 import pytest
 
-from app.catalog_importer import CatalogResourceError, _validate_public_url
+from app.catalog_importer import (
+    CatalogResourceError,
+    _select_best_data_gouv_resource,
+    _validate_public_url,
+)
 from app.catalogs import search_data_europa, search_data_gouv, search_recherche_data_gouv
 
 
@@ -74,3 +78,14 @@ def test_normalizes_research_data_result():
 def test_blocks_non_public_download_addresses(url):
     with pytest.raises(CatalogResourceError):
         _validate_public_url(url)
+
+
+def test_automatically_selects_latest_available_main_csv():
+    selected = _select_best_data_gouv_resource([
+        {"id": "json", "format": "json", "url": "https://example.test/data.json"},
+        {"id": "dead", "format": "csv", "url": "https://example.test/dead.csv", "extras": {"check:available": False}},
+        {"id": "old", "format": "csv", "url": "https://example.test/old.csv", "type": "main", "last_modified": "2025-01-01"},
+        {"id": "new", "format": "csv", "url": "https://example.test/new.csv", "type": "main", "last_modified": "2026-01-01"},
+    ])
+
+    assert selected["id"] == "new"

@@ -2,15 +2,6 @@
 
 import { FormEvent, useState } from "react";
 
-type Resource = {
-  id: string | null;
-  title: string;
-  format: string;
-  url: string | null;
-  size: number | null;
-  can_explore: boolean;
-};
-
 type SearchResult = {
   id: string;
   source: string;
@@ -21,7 +12,6 @@ type SearchResult = {
   formats: string[];
   license: string | null;
   url: string | null;
-  resources: Resource[];
   can_explore: boolean;
 };
 
@@ -78,14 +68,13 @@ export default function Home() {
     }
   }
 
-  async function explore(result: SearchResult, resource: Resource) {
-    if (result.source !== "data.gouv.fr" || !resource.id) return;
-    const key = `${result.id}:${resource.id}`;
-    setExploring(key);
+  async function explore(result: SearchResult) {
+    if (result.source !== "data.gouv.fr") return;
+    setExploring(result.id);
     setError("");
     try {
       const response = await fetch(
-        `${apiUrl}/api/catalogs/data-gouv/${encodeURIComponent(result.id)}/resources/${encodeURIComponent(resource.id)}/explore`,
+        `${apiUrl}/api/catalogs/data-gouv/${encodeURIComponent(result.id)}/explore`,
         { method: "POST" },
       );
       const body = await response.json();
@@ -113,8 +102,14 @@ export default function Home() {
       <header>
         <p className="eyebrow">Explorateur de données publiques</p>
         <h1>Trouver les faits derrière une question.</h1>
-        <p className="intro">Recherchez simultanément dans plusieurs catalogues publics. Comparez les sources, inspectez les ressources et ouvrez les données sans manipuler de fichiers.</p>
+        <p className="intro">Écrivez simplement ce que vous cherchez. Le site s’occupe de trouver et d’ouvrir les fichiers techniques.</p>
       </header>
+
+      <div className="journey" aria-label="Parcours de création">
+        <span className="active"><b>1</b>Trouver des données</span>
+        <span><b>2</b>Croiser deux sources</span>
+        <span><b>3</b>Créer un graphique</span>
+      </div>
 
       <section className="search-card" aria-label="Recherche de données publiques">
         <form className="search-form" onSubmit={submit}>
@@ -150,7 +145,7 @@ function SearchResults({
 }: {
   search: SearchResponse;
   exploring: string;
-  onExplore: (result: SearchResult, resource: Resource) => void;
+  onExplore: (result: SearchResult) => void;
 }) {
   return (
     <section className="search-results">
@@ -183,9 +178,8 @@ function ResultCard({
 }: {
   result: SearchResult;
   exploring: string;
-  onExplore: (result: SearchResult, resource: Resource) => void;
+  onExplore: (result: SearchResult) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   return (
     <article className="result-card">
       <div className="card-topline">
@@ -201,36 +195,15 @@ function ResultCard({
       </div>
 
       <div className="card-actions">
-        {result.resources.length > 0 && (
-          <button className="secondary" onClick={() => setExpanded(!expanded)}>
-            {expanded ? "Masquer les ressources" : `Voir les ressources (${result.resources.length})`}
+        {result.source === "data.gouv.fr" && result.can_explore ? (
+          <button onClick={() => onExplore(result)} disabled={exploring === result.id}>
+            {exploring === result.id ? "Préparation des données…" : "Utiliser ces données"}
           </button>
-        )}
-        {result.url && <a href={result.url} target="_blank" rel="noreferrer">Voir la fiche source ↗</a>}
+        ) : result.url ? (
+          <a className="source-link" href={result.url} target="_blank" rel="noreferrer">Consulter sur la plateforme ↗</a>
+        ) : null}
+        {result.url && result.can_explore && <a href={result.url} target="_blank" rel="noreferrer">Détails de la source ↗</a>}
       </div>
-
-      {expanded && (
-        <div className="resources">
-          {result.resources.map((resource, index) => {
-            const key = `${result.id}:${resource.id}`;
-            return (
-              <div className="resource" key={resource.id ?? `${resource.title}-${index}`}>
-                <div>
-                  <strong>{resource.title}</strong>
-                  <span>{resource.format || "Format inconnu"}{resource.size ? ` · ${formatSize(resource.size)}` : ""}</span>
-                </div>
-                {resource.can_explore ? (
-                  <button onClick={() => onExplore(result, resource)} disabled={exploring === key}>
-                    {exploring === key ? "Ouverture…" : "Explorer les données"}
-                  </button>
-                ) : resource.url ? (
-                  <a href={resource.url} target="_blank" rel="noreferrer">Ouvrir ↗</a>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
     </article>
   );
 }
@@ -240,7 +213,7 @@ function DatasetResult({ dataset }: { dataset: Dataset }) {
     <section className="dataset-view">
       <p className="eyebrow">Ressource publique explorée</p>
       <h1>{dataset.original_name}</h1>
-      <p className="intro">Le fichier a été récupéré automatiquement depuis sa plateforme d’origine et conservé sans modification.</p>
+      <p className="intro">Le site a choisi la ressource tabulaire, l’a récupérée et l’a ouverte automatiquement. Vous n’avez aucun fichier à manipuler.</p>
       <div className="summary">
         <div><span>Lignes</span><strong>{dataset.row_count.toLocaleString("fr-FR")}</strong></div>
         <div><span>Colonnes</span><strong>{dataset.columns.length}</strong></div>
