@@ -23,7 +23,7 @@ L’utilisateur décrit les données qu’il recherche sans connaître les catal
 
 - interroge plusieurs catalogues publics ;
 - présente les jeux de données et leurs producteurs ;
-- classe en premier les résultats contenant une table publique exploitable ;
+- affiche uniquement les résultats contenant une table publique exploitable ou vérifiable ;
 - choisit et télécharge automatiquement la meilleure ressource disponible ;
 - conserve le fichier original et son empreinte SHA-256 ;
 - affiche le nombre de lignes, les colonnes, leurs types et un aperçu.

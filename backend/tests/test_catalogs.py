@@ -11,6 +11,7 @@ from app.catalog_importer import (
     _validate_public_url,
 )
 from app.catalogs import search_data_europa, search_data_gouv, search_recherche_data_gouv
+from app.catalogs import _is_usable_result
 
 
 def test_normalizes_data_gouv_result():
@@ -161,3 +162,9 @@ def test_research_data_gouv_keeps_only_public_tabular_files():
         "url": "https://example.test/api/access/datafile/42",
         "size": 120,
     }]
+
+
+def test_hides_results_that_cannot_be_used_in_the_project():
+    assert _is_usable_result({"can_explore": True}) is True
+    assert _is_usable_result({"can_check": True}) is True
+    assert _is_usable_result({"can_explore": False, "can_check": False}) is False

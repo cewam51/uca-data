@@ -19,7 +19,6 @@ type SearchResult = {
 type SearchResponse = {
   query: string;
   total: number;
-  usable_total: number;
   sources: { name: string; status: "ok" | "unavailable"; count: number }[];
   results: SearchResult[];
 };
@@ -162,7 +161,7 @@ function SearchResults({
       <div className="results-heading">
         <div>
           <p className="eyebrow">Résultats</p>
-          <h2>{search.usable_total} jeux utilisables sur {search.total} résultats pour « {search.query} »</h2>
+          <h2>{search.total} jeux de données utilisables pour « {search.query} »</h2>
         </div>
         <div className="source-status">
           {search.sources.map((source) => (
@@ -190,6 +189,7 @@ function ResultCard({
   exploring: string;
   onExplore: (result: SearchResult) => void;
 }) {
+  if (!result.can_explore && !result.can_check) return null;
   const key = `${result.source}:${result.id}`;
   return (
     <article className="result-card">
@@ -206,17 +206,13 @@ function ResultCard({
       </div>
 
       <div className="card-actions">
-        {result.can_explore || result.can_check ? (
-          <button onClick={() => onExplore(result)} disabled={exploring === key}>
-            {exploring === key
-              ? "Préparation des données…"
-              : result.can_check
-                ? "Vérifier et utiliser"
-                : "Utiliser ces données"}
-          </button>
-        ) : (
-          <span className="unavailable-note">Pas de table publique compatible détectée</span>
-        )}
+        <button onClick={() => onExplore(result)} disabled={exploring === key}>
+          {exploring === key
+            ? "Préparation des données…"
+            : result.can_check
+              ? "Vérifier et utiliser"
+              : "Utiliser ces données"}
+        </button>
         {result.url && <a href={result.url} target="_blank" rel="noreferrer">Voir la fiche source ↗</a>}
       </div>
     </article>

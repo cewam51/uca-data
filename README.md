@@ -23,7 +23,7 @@ Permettre à une personne sans compétences techniques de :
 
 ## Fonctionnalités disponibles
 
-Le site recherche actuellement dans data.gouv.fr, data.europa.eu et Recherche Data Gouv. Il classe en premier les résultats qui contiennent une table publique réellement exploitable, choisit automatiquement la meilleure ressource CSV ou TSV et l’ajoute au projet sans demander de fichier à l’utilisateur. Les résultats non tabulaires ou restreints sont signalés clairement. Chaque fichier retenu est téléchargé côté serveur, conservé sans modification, analysé avec DuckDB et identifié par son empreinte SHA-256.
+Le site recherche actuellement dans data.gouv.fr, data.europa.eu et Recherche Data Gouv. Il affiche uniquement les résultats qui contiennent une table publique exploitable ou vérifiable, choisit automatiquement la meilleure ressource CSV ou TSV et l’ajoute au projet sans demander de fichier à l’utilisateur. Les résultats non tabulaires ou restreints ne sont pas affichés. Chaque fichier retenu est téléchargé côté serveur, conservé sans modification, analysé avec DuckDB et identifié par son empreinte SHA-256.
 
 Étapes suivantes : identification sémantique des colonnes, croisement de plusieurs sources, calcul d’indicateurs, visualisations Vega-Lite et fiches collaboratives versionnées.
 

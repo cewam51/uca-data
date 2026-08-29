@@ -59,7 +59,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .card-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 20px; align-items: center; }
 .card-actions a, .resource a { color: var(--green); font-size: .82rem; font-weight: 700; text-decoration: none; }
 .card-actions .source-link { border-radius: 9px; background: var(--green); color: white; padding: 11px 13px; }
-.unavailable-note { max-width: 240px; color: #7a5a33; font-size: .8rem; font-weight: 700; line-height: 1.35; }
 .resources { margin: 18px -22px -22px; border-top: 1px solid var(--line); background: #faf9f4; border-radius: 0 0 16px 16px; padding: 8px 22px; }
 .resource { display: flex; justify-content: space-between; gap: 14px; border-bottom: 1px solid #e5e2d8; padding: 13px 0; align-items: center; }
 .resource:last-child { border-bottom: 0; }

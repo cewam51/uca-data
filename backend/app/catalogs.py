@@ -30,8 +30,9 @@ async def search_catalogs(query: str, limit: int = 6) -> dict[str, Any]:
         if isinstance(response, BaseException):
             sources.append({"name": name, "status": "unavailable", "count": 0})
             continue
-        results.extend(response)
-        sources.append({"name": name, "status": "ok", "count": len(response)})
+        usable_results = [item for item in response if _is_usable_result(item)]
+        results.extend(usable_results)
+        sources.append({"name": name, "status": "ok", "count": len(usable_results)})
 
     results.sort(
         key=lambda item: (bool(item.get("can_explore")), bool(item.get("can_check"))),
@@ -40,10 +41,13 @@ async def search_catalogs(query: str, limit: int = 6) -> dict[str, Any]:
     return {
         "query": query,
         "total": len(results),
-        "usable_total": sum(bool(item.get("can_explore")) for item in results),
         "sources": sources,
         "results": results,
     }
+
+
+def _is_usable_result(item: dict[str, Any]) -> bool:
+    return bool(item.get("can_explore") or item.get("can_check"))
 
 
 async def search_data_gouv(client: httpx.AsyncClient, query: str, limit: int) -> list[dict[str, Any]]:
