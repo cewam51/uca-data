@@ -295,6 +295,7 @@ def _download_and_import(
     result["catalog_dataset_id"] = dataset_id
     result["catalog_resource_id"] = resource_id
     result["source_url"] = source_url
+    service.attach_provenance(result)
     return result
 
 

@@ -26,7 +26,8 @@ L’utilisateur décrit les données qu’il recherche sans connaître les catal
 - affiche uniquement les résultats contenant une table publique exploitable ou vérifiable ;
 - choisit et télécharge automatiquement la meilleure ressource disponible ;
 - conserve le fichier original et son empreinte SHA-256 ;
-- affiche le nombre de lignes, les colonnes, leurs types et un aperçu.
+- affiche le nombre de lignes, les colonnes, leurs types et un aperçu ;
+- conserve une première source dans un projet puis permet d’y ajouter une deuxième source.
 
 ## Hors périmètre
 

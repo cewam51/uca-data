@@ -12,9 +12,23 @@ class MemoryRepository:
     def save(self, dataset):
         self.saved.append(dataset)
 
+    def update_provenance(self, dataset):
+        self.saved[-1].update({
+            key: dataset.get(key)
+            for key in ("catalog_source", "catalog_dataset_id", "catalog_resource_id", "source_url")
+        })
+
 
 def test_no_direct_file_upload_is_exposed():
     assert "/api/datasets" not in app.openapi()["paths"]
+
+
+def test_project_can_receive_two_persisted_sources():
+    paths = app.openapi()["paths"]
+
+    assert "post" in paths["/api/projects"]
+    assert "get" in paths["/api/projects/{project_id}"]
+    assert "post" in paths["/api/projects/{project_id}/sources"]
 
 
 def test_upload_keeps_original_and_returns_analysis(tmp_path: Path):

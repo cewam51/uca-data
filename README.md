@@ -25,6 +25,8 @@ Permettre à une personne sans compétences techniques de :
 
 Le site recherche actuellement dans data.gouv.fr, data.europa.eu et Recherche Data Gouv. Il affiche uniquement les résultats qui contiennent une table publique exploitable ou vérifiable, choisit automatiquement la meilleure ressource CSV ou TSV et l’ajoute au projet sans demander de fichier à l’utilisateur. Les résultats non tabulaires ou restreints ne sont pas affichés. Chaque fichier retenu est téléchargé côté serveur, conservé sans modification, analysé avec DuckDB et identifié par son empreinte SHA-256.
 
+Une première source crée un projet persistant. L’utilisateur peut ensuite lancer une nouvelle recherche et ajouter une seconde source ; les deux jeux de données restent ordonnés dans le projet avec leur titre, producteur, provenance, structure et empreinte.
+
 Étapes suivantes : identification sémantique des colonnes, croisement de plusieurs sources, calcul d’indicateurs, visualisations Vega-Lite et fiches collaboratives versionnées.
 
 Stack : Next.js/TypeScript, FastAPI/Python, DuckDB et PostgreSQL.

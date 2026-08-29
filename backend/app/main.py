@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
+from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from .catalog_importer import (
     CatalogResourceError,
@@ -18,6 +20,19 @@ from .service import CsvUploadService, UploadTooLargeError
 
 
 repository = PostgresDatasetRepository(settings.database_url)
+
+
+class ProjectCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    dataset_id: UUID
+    source_title: str = Field(min_length=1, max_length=500)
+    source_publisher: str | None = Field(default=None, max_length=300)
+
+
+class ProjectSourceCreate(BaseModel):
+    dataset_id: UUID
+    source_title: str = Field(min_length=1, max_length=500)
+    source_publisher: str | None = Field(default=None, max_length=300)
 
 
 @asynccontextmanager
@@ -44,6 +59,45 @@ def get_service() -> CsvUploadService:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/projects", status_code=201)
+def create_project(payload: ProjectCreate) -> dict:
+    title = payload.title.strip()
+    if len(title) < 2:
+        raise HTTPException(status_code=422, detail="Le titre du projet est trop court.")
+    try:
+        return repository.create_project(
+            title,
+            payload.dataset_id,
+            payload.source_title.strip(),
+            payload.source_publisher.strip() if payload.source_publisher else None,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(project_id: UUID) -> dict:
+    try:
+        return repository.get_project(project_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/sources", status_code=201)
+def add_project_source(project_id: UUID, payload: ProjectSourceCreate) -> dict:
+    try:
+        return repository.add_project_source(
+            project_id,
+            payload.dataset_id,
+            payload.source_title.strip(),
+            payload.source_publisher.strip() if payload.source_publisher else None,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.get("/api/search")

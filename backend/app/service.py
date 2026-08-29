@@ -60,3 +60,6 @@ class CsvUploadService:
         except Exception:
             destination.unlink(missing_ok=True)
             raise
+
+    def attach_provenance(self, dataset: dict) -> None:
+        self.repository.update_provenance(dataset)

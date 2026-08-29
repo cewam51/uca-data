@@ -17,6 +17,8 @@ tests/     -> jeux de données artificiels et tests d’intégration
 docs/      -> produit, architecture et règles de données
 ```
 
+PostgreSQL conserve les métadonnées des tables importées, leur provenance et les projets qui associent deux sources ordonnées. Les fichiers originaux restent dans le volume dédié.
+
 L’IA peut assister la recherche, proposer des opérations et générer du code. Les téléchargements, empreintes, filtres, jointures, calculs et agrégations doivent rester déterministes.
 
 Le navigateur ne transmet jamais une URL arbitraire à télécharger. Le backend retrouve la ressource dans le catalogue officiel, bloque les destinations réseau privées, applique une limite de taille, conserve l’original puis lance l’analyse.
