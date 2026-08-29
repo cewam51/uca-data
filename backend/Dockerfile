@@ -2,8 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 COPY pyproject.toml .
-RUN pip install --no-cache-dir .
 COPY app ./app
+RUN pip install --no-cache-dir .
 RUN mkdir -p /data/uploads
 
 ENV UPLOAD_DIR=/data/uploads

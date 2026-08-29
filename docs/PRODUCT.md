@@ -2,16 +2,18 @@
 
 ## Objectif
 
-UCA Data aide les citoyens à rechercher des données publiques, croiser plusieurs sources, créer des indicateurs transparents, visualiser les résultats et les intégrer à terme dans des fiches collaboratives.
+L’explorateur aide les citoyens à rechercher des données publiques, croiser plusieurs sources, créer des indicateurs transparents, visualiser les résultats et les intégrer à terme dans des fiches collaboratives.
 
-## MVP initial
+## Premier parcours utilisateur
 
-L’utilisateur peut téléverser un fichier CSV. Le système conserve le fichier original et son empreinte SHA-256, puis renvoie :
+L’utilisateur décrit les données qu’il recherche sans connaître les catalogues, API ou formats sous-jacents. Le système :
 
-- le nombre de lignes ;
-- les noms des colonnes ;
-- les types détectés ;
-- les 20 premières lignes.
+- interroge plusieurs catalogues publics ;
+- présente les jeux de données et leurs producteurs ;
+- affiche les ressources, formats, dates et liens officiels ;
+- télécharge automatiquement la ressource choisie ;
+- conserve le fichier original et son empreinte SHA-256 ;
+- affiche le nombre de lignes, les colonnes, leurs types et un aperçu.
 
 ## Hors périmètre initial
 
@@ -19,7 +21,6 @@ L’utilisateur peut téléverser un fichier CSV. Le système conserve le fichie
 - prédictions et projections ;
 - génération de données par IA ;
 - graphiques ;
-- recherche data.gouv.fr ;
 - jointures entre datasets ;
 - fiches collaboratives.
 

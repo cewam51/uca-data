@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "UCA Data",
-  description: "Explorer des données publiques de façon transparente",
+  title: "Explorateur de données publiques",
+  description: "Trouver, comprendre et croiser des données publiques",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

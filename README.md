@@ -1,12 +1,13 @@
-# UCA Data
+# Explorateur de données publiques
 
-Prototype open source d’outil citoyen pour explorer des données publiques, croiser des sources et créer des indicateurs transparents et reproductibles.
+Prototype open source permettant de rechercher des données publiques, d’explorer leurs ressources, de croiser des sources et de créer des indicateurs transparents et reproductibles.
 
 ## Vision
 
 Permettre à une personne sans compétences techniques de :
 
-- rechercher ou importer des données publiques ;
+- rechercher simultanément dans plusieurs catalogues publics ;
+- ouvrir une ressource sans manipuler directement de CSV ;
 - comprendre leur structure et leur provenance ;
 - croiser plusieurs sources avec des contrôles explicites ;
 - construire des indicateurs déterministes ;
@@ -20,9 +21,11 @@ Permettre à une personne sans compétences techniques de :
 - calculs reproductibles et versions précédentes accessibles ;
 - séparation entre assistance par IA et moteur de calcul déterministe.
 
-## MVP disponible
+## Fonctionnalités disponibles
 
-Le MVP permet de téléverser un CSV, de conserver l’original et d’afficher son nombre de lignes, ses colonnes, les types détectés et ses 20 premières lignes. L’empreinte SHA-256 et les métadonnées sont enregistrées dans PostgreSQL.
+Le site recherche actuellement dans data.gouv.fr, data.europa.eu et Recherche Data Gouv. Il permet de comparer les métadonnées et les formats, puis d’explorer automatiquement les ressources CSV de data.gouv.fr. Le fichier sélectionné est téléchargé côté serveur, conservé sans modification, analysé avec DuckDB et identifié par son empreinte SHA-256.
+
+Étapes suivantes : identification sémantique des colonnes, croisement de plusieurs sources, calcul d’indicateurs, visualisations Vega-Lite et fiches collaboratives versionnées.
 
 Stack : Next.js/TypeScript, FastAPI/Python, DuckDB et PostgreSQL.
 

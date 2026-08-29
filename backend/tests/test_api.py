@@ -1,9 +1,7 @@
 from io import BytesIO
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-from app.main import app, get_service
+from app.main import app
 from app.service import CsvUploadService
 
 
@@ -15,21 +13,18 @@ class MemoryRepository:
         self.saved.append(dataset)
 
 
+def test_no_direct_file_upload_is_exposed():
+    assert "/api/datasets" not in app.openapi()["paths"]
+
+
 def test_upload_keeps_original_and_returns_analysis(tmp_path: Path):
     repository = MemoryRepository()
     service = CsvUploadService(tmp_path, 1024 * 1024, repository)
-    app.dependency_overrides[get_service] = lambda: service
-
-    client = TestClient(app)
-    response = client.post(
-        "/api/datasets",
-        files={"file": ("population.csv", b"ville,population\nParis,2102650\n", "text/csv")},
+    body = service.import_csv(
+        "population.csv",
+        BytesIO(b"ville,population\nParis,2102650\n"),
     )
-    client.close()
 
-    app.dependency_overrides.clear()
-    assert response.status_code == 201
-    body = response.json()
     assert body["row_count"] == 1
     assert len(body["sha256"]) == 64
     assert (tmp_path / body["stored_name"]).read_bytes() == b"ville,population\nParis,2102650\n"

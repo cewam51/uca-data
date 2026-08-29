@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+import httpx
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from .catalog_importer import CatalogResourceError, import_data_gouv_resource
+from .catalogs import search_catalogs
 from .config import settings
 from .repository import PostgresDatasetRepository
 from .service import CsvUploadService, UploadTooLargeError
@@ -18,7 +21,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="UCA Data API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Explorateur de données publiques", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -37,16 +40,27 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/datasets", status_code=201)
-def upload_dataset(
-    file: UploadFile = File(...),
+@app.get("/api/search")
+async def search_datasets(
+    q: str = Query(min_length=2, max_length=160),
+    limit: int = Query(default=6, ge=1, le=12),
+) -> dict:
+    return await search_catalogs(q.strip(), limit)
+
+
+@app.post("/api/catalogs/data-gouv/{dataset_id}/resources/{resource_id}/explore", status_code=201)
+def explore_data_gouv_resource(
+    dataset_id: str,
+    resource_id: str,
     service: CsvUploadService = Depends(get_service),
 ) -> dict:
     try:
-        return service.import_csv(file.filename or "dataset.csv", file.file)
+        return import_data_gouv_resource(dataset_id, resource_id, service)
     except UploadTooLargeError as error:
         raise HTTPException(status_code=413, detail=str(error)) from error
-    except ValueError as error:
+    except CatalogResourceError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="La plateforme source ne répond pas correctement.") from error
     except Exception as error:
-        raise HTTPException(status_code=422, detail="Le CSV n’a pas pu être analysé.") from error
+        raise HTTPException(status_code=422, detail="Cette ressource n’a pas pu être analysée.") from error
