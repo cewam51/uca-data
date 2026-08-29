@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+__pycache__/
+.pytest_cache/
+.venv/
+*.py[cod]
+*.duckdb
+uploads/
+data/
+coverage/
+.DS_Store
