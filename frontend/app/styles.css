@@ -114,6 +114,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .match-metrics div { display: flex; flex-direction: column; gap: 7px; background: #fff; padding: 14px; }
 .match-metrics span { color: var(--muted); font-size: .72rem; }
 .match-metrics strong { font-size: 1.25rem; }
+.scope-diagnostics { display: grid; gap: 7px; margin-top: 12px; border-radius: 9px; background: #f7f8f4; padding: 12px 14px; }
+.scope-diagnostics p { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.5; }
+.scope-diagnostics strong { color: var(--ink); }
 .warnings { margin-top: 14px; }
 .warnings p { margin: 7px 0; border-left: 3px solid var(--orange); background: #fff8f1; color: #70472e; font-size: .85rem; line-height: 1.45; padding: 10px 12px; }
 .join-quality details { margin-top: 15px; }

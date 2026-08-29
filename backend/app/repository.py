@@ -476,6 +476,7 @@ class PostgresDatasetRepository:
             "project_id": str(version[1]),
             "version_number": version[2],
             "snapshot_sha256": version[4],
+            "integrity_verified": snapshot_sha256(version[3]) == version[4],
             "created_at": version[5].isoformat(),
             "comments": [
                 {

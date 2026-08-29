@@ -65,6 +65,18 @@ type JoinAnalysis = {
   right_duplicate_keys: number;
   left_unmatched_samples: { commune: string; année: string | null }[];
   right_unmatched_samples: { commune: string; année: string | null }[];
+  geography?: {
+    left_communes: number;
+    right_communes: number;
+    matched_communes: number;
+    left_match_rate: number;
+    right_match_rate: number;
+  };
+  periods?: {
+    left: { first: string; last: string; distinct_years: number };
+    right: { first: string; last: string; distinct_years: number };
+    matched_years: number;
+  } | null;
   warnings: string[];
 };
 
@@ -155,6 +167,7 @@ type PublishedVersion = {
   published_at: string;
   created_at: string;
   snapshot_sha256: string;
+  integrity_verified: boolean;
   sources: PublishedSource[];
   join_analysis: JoinAnalysis;
   indicator: IndicatorResult;
@@ -749,6 +762,17 @@ function JoinQuality({ analysis, sources }: { analysis: JoinAnalysis; sources: P
         <div><span>Source 2 retrouvée</span><strong>{analysis.right_match_rate.toLocaleString("fr-FR")} %</strong></div>
         <div><span>Clés répétées</span><strong>{analysis.left_duplicate_keys + analysis.right_duplicate_keys}</strong></div>
       </div>
+      {(analysis.geography || analysis.periods) && (
+        <div className="scope-diagnostics">
+          {analysis.geography && (
+            <p><strong>Communes :</strong> {analysis.geography.matched_communes.toLocaleString("fr-FR")} communes communes aux deux sources, sur {analysis.geography.left_communes.toLocaleString("fr-FR")} et {analysis.geography.right_communes.toLocaleString("fr-FR")}.</p>
+          )}
+          {analysis.periods && (
+            <p><strong>Années :</strong> source 1 de {analysis.periods.left.first} à {analysis.periods.left.last} ; source 2 de {analysis.periods.right.first} à {analysis.periods.right.last}.</p>
+          )}
+          <p><strong>Règle :</strong> comparaison exacte après harmonisation de la casse et des espaces, sans deviner ni remplacer une valeur.</p>
+        </div>
+      )}
       {analysis.warnings.length > 0 && (
         <div className="warnings">
           {analysis.warnings.map((warning) => <p key={warning}>{warning}</p>)}
@@ -1172,6 +1196,16 @@ function PublishedSheet({ publication }: { publication: PublishedVersion }) {
             <div><span>Source 1 retrouvée</span><strong>{publication.join_analysis.left_match_rate.toLocaleString("fr-FR")} %</strong></div>
             <div><span>Source 2 retrouvée</span><strong>{publication.join_analysis.right_match_rate.toLocaleString("fr-FR")} %</strong></div>
           </div>
+          {(publication.join_analysis.geography || publication.join_analysis.periods) && (
+            <div className="scope-diagnostics">
+              {publication.join_analysis.geography && (
+                <p><strong>Périmètre géographique :</strong> {publication.join_analysis.geography.matched_communes.toLocaleString("fr-FR")} communes communes, sur {publication.join_analysis.geography.left_communes.toLocaleString("fr-FR")} dans la source 1 et {publication.join_analysis.geography.right_communes.toLocaleString("fr-FR")} dans la source 2.</p>
+              )}
+              {publication.join_analysis.periods && (
+                <p><strong>Périodes :</strong> {publication.join_analysis.periods.left.first}–{publication.join_analysis.periods.left.last} dans la source 1 ; {publication.join_analysis.periods.right.first}–{publication.join_analysis.periods.right.last} dans la source 2.</p>
+              )}
+            </div>
+          )}
           {publication.join_analysis.warnings.length > 0 && (
             <div className="warnings">{publication.join_analysis.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>
           )}
@@ -1215,7 +1249,7 @@ function PublishedSheet({ publication }: { publication: PublishedVersion }) {
             <li>{publication.reproducibility.missing_data_policy}</li>
           </ol>
           <div className="snapshot-fingerprint">
-            <span>Empreinte de cette version</span>
+            <span>Empreinte de cette version · {publication.integrity_verified ? "intégrité vérifiée" : "intégrité non vérifiée"}</span>
             <code>{publication.snapshot_sha256}</code>
           </div>
         </section>

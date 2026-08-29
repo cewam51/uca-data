@@ -39,9 +39,18 @@ def test_join_reports_matches_duplicates_and_unmatched_keys(tmp_path: Path):
     assert result["right_match_rate"] == 66.7
     assert result["left_duplicate_keys"] == 1
     assert result["right_duplicate_keys"] == 0
+    assert result["geography"] == {
+        "left_communes": 3,
+        "right_communes": 3,
+        "matched_communes": 2,
+        "left_match_rate": 66.7,
+        "right_match_rate": 66.7,
+    }
+    assert result["periods"]["matched_years"] == 1
     assert result["left_unmatched_samples"] == [{"commune": "LILLE", "année": "2023"}]
     assert result["right_unmatched_samples"] == [{"commune": "NANTES", "année": "2023"}]
-    assert len(result["warnings"]) == 2
+    assert any("Périmètres géographiques différents" in warning for warning in result["warnings"])
+    assert len(result["warnings"]) == 3
 
 
 def test_join_without_year_warns_instead_of_inventing_one(tmp_path: Path):
@@ -55,6 +64,22 @@ def test_join_without_year_warns_instead_of_inventing_one(tmp_path: Path):
     assert result["dimensions"] == ["commune"]
     assert result["matched_keys"] == 1
     assert "uniquement sur la commune" in result["warnings"][0]
+
+
+def test_join_reports_different_periods_explicitly(tmp_path: Path):
+    left = tmp_path / "left.csv"
+    right = tmp_path / "right.csv"
+    left.write_text("commune,annee,valeur\nParis,2022,10\nParis,2023,12\n", encoding="utf-8")
+    right.write_text("ville,year,mesure\nParis,2023,2\nParis,2024,3\n", encoding="utf-8")
+
+    result = analyze_join(left, right, "commune", "ville", "annee", "year")
+
+    assert result["periods"] == {
+        "left": {"first": "2022", "last": "2023", "distinct_years": 2},
+        "right": {"first": "2023", "last": "2024", "distinct_years": 2},
+        "matched_years": 1,
+    }
+    assert any("Périodes différentes" in warning for warning in result["warnings"])
 
 
 def test_indicator_aggregates_before_calculating_a_transparent_ratio(tmp_path: Path):

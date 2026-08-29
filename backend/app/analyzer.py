@@ -135,6 +135,29 @@ def analyze_join(
         left_unmatched = _unmatched_samples(connection, "left_keys", "right_keys")
         right_unmatched = _unmatched_samples(connection, "right_keys", "left_keys")
 
+        left_communes = connection.execute(
+            "SELECT count(DISTINCT commune_key) FROM left_keys"
+        ).fetchone()[0]
+        right_communes = connection.execute(
+            "SELECT count(DISTINCT commune_key) FROM right_keys"
+        ).fetchone()[0]
+        matched_communes = connection.execute(
+            """
+            SELECT count(*) FROM (
+                SELECT DISTINCT l.commune_key
+                FROM left_keys l INNER JOIN right_keys r USING (commune_key)
+            ) common_communes
+            """
+        ).fetchone()[0]
+        geography = {
+            "left_communes": left_communes,
+            "right_communes": right_communes,
+            "matched_communes": matched_communes,
+            "left_match_rate": _rate(matched_communes, left_communes),
+            "right_match_rate": _rate(matched_communes, right_communes),
+        }
+        periods = _period_diagnostics(connection) if uses_year else None
+
         left_rate = _rate(matched, left_distinct)
         right_rate = _rate(matched, right_distinct)
         warnings = []
@@ -142,6 +165,25 @@ def analyze_join(
             warnings.append(
                 "Aucune année commune n’est sélectionnée dans les deux sources : "
                 "la comparaison porte uniquement sur la commune."
+            )
+        elif periods and (
+            periods["left"]["first"] != periods["right"]["first"]
+            or periods["left"]["last"] != periods["right"]["last"]
+            or periods["matched_years"] < min(
+                periods["left"]["distinct_years"],
+                periods["right"]["distinct_years"],
+            )
+        ):
+            warnings.append(
+                "Périodes différentes : la source 1 couvre "
+                f"{periods['left']['first']}–{periods['left']['last']} et la source 2 "
+                f"{periods['right']['first']}–{periods['right']['last']}."
+            )
+        if matched_communes < left_communes or matched_communes < right_communes:
+            warnings.append(
+                "Périmètres géographiques différents : "
+                f"{matched_communes} commune(s) sont communes aux deux sources, "
+                f"sur {left_communes} dans la source 1 et {right_communes} dans la source 2."
             )
         if left_duplicates or right_duplicates:
             warnings.append(
@@ -170,6 +212,8 @@ def analyze_join(
             "right_duplicate_keys": right_duplicates,
             "left_unmatched_samples": left_unmatched,
             "right_unmatched_samples": right_unmatched,
+            "geography": geography,
+            "periods": periods,
             "warnings": warnings,
         }
     finally:
@@ -431,6 +475,35 @@ def _unmatched_samples(
         """
     ).fetchall()
     return [{"commune": row[0], "année": row[1]} for row in rows]
+
+
+def _period_diagnostics(connection: duckdb.DuckDBPyConnection) -> dict[str, Any]:
+    left = connection.execute(
+        """
+        SELECT min(year_key), max(year_key), count(DISTINCT year_key)
+        FROM left_keys WHERE year_key <> ''
+        """
+    ).fetchone()
+    right = connection.execute(
+        """
+        SELECT min(year_key), max(year_key), count(DISTINCT year_key)
+        FROM right_keys WHERE year_key <> ''
+        """
+    ).fetchone()
+    matched_years = connection.execute(
+        """
+        SELECT count(*) FROM (
+            SELECT DISTINCT l.year_key
+            FROM left_keys l INNER JOIN right_keys r USING (year_key)
+            WHERE l.year_key <> ''
+        ) common_years
+        """
+    ).fetchone()[0]
+    return {
+        "left": {"first": left[0], "last": left[1], "distinct_years": left[2]},
+        "right": {"first": right[0], "last": right[1], "distinct_years": right[2]},
+        "matched_years": matched_years,
+    }
 
 
 def _rate(matched: int, total: int) -> float:

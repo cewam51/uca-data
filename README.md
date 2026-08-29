@@ -27,7 +27,7 @@ Le site recherche actuellement dans data.gouv.fr, data.europa.eu et Recherche Da
 
 Une première source crée un projet persistant et ajoute son identifiant à l’adresse de la page. L’utilisateur peut ensuite lancer une nouvelle recherche et ajouter une seconde source ; les deux jeux de données restent ordonnés dans le projet avec leur titre, producteur, provenance, structure et empreinte, y compris après un rechargement de la page.
 
-Avec deux sources, le site suggère les colonnes susceptibles de représenter la commune et l’année à partir de leur nom et de valeurs d’exemple. L’utilisateur confirme explicitement ses choix. Le site calcule ensuite le nombre de clés appariées, les taux de correspondance dans chaque source, les clés répétées et quelques valeurs non retrouvées. Une année absente n’est jamais inventée : le croisement est limité à la commune et une alerte l’explique.
+Avec deux sources, le site suggère les colonnes susceptibles de représenter la commune et l’année à partir de leur nom et de valeurs d’exemple. L’utilisateur confirme explicitement ses choix. Le site calcule ensuite le nombre de clés appariées, les taux de correspondance dans chaque source, les clés répétées, les périodes couvertes, le nombre de communes communes et quelques valeurs non retrouvées. Une année absente n’est jamais inventée : le croisement est limité à la commune et une alerte l’explique.
 
 Lorsque le croisement contient des correspondances, l’utilisateur choisit une valeur numérique et une agrégation pour chaque source, puis une formule : rapport en pourcentage ou différence. Le calcul est effectué sur les clés appariées seulement. La formule exacte, les exclusions, les valeurs agrégées et le résultat restent visibles avec un graphique en barres et un tableau de contrôle. Les choix et le résultat sont conservés dans le projet avec les empreintes des deux sources.
 
@@ -77,7 +77,7 @@ cd backend
 .venv/bin/pytest
 ```
 
-Voir [`docs/PRODUCT.md`](docs/PRODUCT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) et [`docs/DATA_RULES.md`](docs/DATA_RULES.md).
+Voir [`docs/PRODUCT.md`](docs/PRODUCT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/DATA_RULES.md`](docs/DATA_RULES.md) et [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
 
 ## Licence
 

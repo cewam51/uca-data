@@ -19,7 +19,7 @@ docs/      -> produit, architecture et règles de données
 
 PostgreSQL conserve les métadonnées des tables importées, leur provenance, les projets qui associent deux sources ordonnées, les dimensions choisies, le dernier diagnostic de jointure, la configuration/résultat de l’indicateur, les instantanés publiés et leurs commentaires. Les fichiers originaux restent dans le volume dédié.
 
-DuckDB profile les colonnes, calcule la qualité du croisement, agrège les mesures choisies et applique la formule directement sur les fichiers conservés. La normalisation de clé est limitée à la casse, aux espaces et à une conversion textuelle explicite ; aucune valeur géographique, temporelle ou numérique manquante n’est créée. Les divisions par zéro et valeurs non numériques sont exclues et comptabilisées.
+DuckDB profile les colonnes, calcule la qualité du croisement, compare explicitement les périodes et périmètres communaux, agrège les mesures choisies et applique la formule directement sur les fichiers conservés. La normalisation de clé est limitée à la casse, aux espaces et à une conversion textuelle explicite ; aucune valeur géographique, temporelle ou numérique manquante n’est créée. Les divisions par zéro et valeurs non numériques sont exclues et comptabilisées.
 
 Une publication copie l’état complet du projet dans un instantané JSONB, numéroté sous verrou transactionnel. Une empreinte SHA-256 calculée sur sa représentation canonique permet de vérifier qu’il n’a pas changé. Aucun endpoint ne modifie ou ne supprime une version ; les contributions sont enregistrées séparément.
 
