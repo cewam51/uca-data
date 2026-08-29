@@ -43,7 +43,8 @@ class PostgresDatasetRepository:
                 CREATE TABLE IF NOT EXISTS projects (
                     id UUID PRIMARY KEY,
                     title TEXT NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL
+                    created_at TIMESTAMPTZ NOT NULL,
+                    join_analysis_json JSONB
                 )
                 """
             )
@@ -55,6 +56,8 @@ class PostgresDatasetRepository:
                     position SMALLINT NOT NULL CHECK (position BETWEEN 1 AND 2),
                     label TEXT,
                     publisher TEXT,
+                    commune_column TEXT,
+                    year_column TEXT,
                     added_at TIMESTAMPTZ NOT NULL,
                     PRIMARY KEY (project_id, dataset_id),
                     UNIQUE (project_id, position)
@@ -66,6 +69,15 @@ class PostgresDatasetRepository:
             )
             connection.execute(
                 "ALTER TABLE project_sources ADD COLUMN IF NOT EXISTS publisher TEXT"
+            )
+            connection.execute(
+                "ALTER TABLE project_sources ADD COLUMN IF NOT EXISTS commune_column TEXT"
+            )
+            connection.execute(
+                "ALTER TABLE project_sources ADD COLUMN IF NOT EXISTS year_column TEXT"
+            )
+            connection.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS join_analysis_json JSONB"
             )
 
     def save(self, dataset: dict[str, Any]) -> None:
@@ -181,7 +193,7 @@ class PostgresDatasetRepository:
     def get_project(self, project_id: UUID) -> dict[str, Any]:
         with psycopg.connect(self.database_url) as connection:
             project = connection.execute(
-                "SELECT id, title, created_at FROM projects WHERE id = %s",
+                "SELECT id, title, created_at, join_analysis_json FROM projects WHERE id = %s",
                 (project_id,),
             ).fetchone()
             if project is None:
@@ -190,7 +202,8 @@ class PostgresDatasetRepository:
                 """
                 SELECT ps.position, d.id, d.original_name, d.sha256, d.size_bytes,
                        d.row_count, d.columns_json, d.provenance_json,
-                       COALESCE(ps.label, d.original_name), ps.publisher
+                       COALESCE(ps.label, d.original_name), ps.publisher,
+                       ps.commune_column, ps.year_column
                 FROM project_sources ps
                 JOIN datasets d ON d.id = ps.dataset_id
                 WHERE ps.project_id = %s
@@ -211,6 +224,10 @@ class PostgresDatasetRepository:
                 **(row[7] or {}),
                 "title": row[8],
                 "publisher": row[9],
+                "dimensions": {
+                    "commune": row[10],
+                    "année": row[11],
+                },
             }
             for row in rows
         ]
@@ -219,4 +236,81 @@ class PostgresDatasetRepository:
             "title": project[1],
             "created_at": project[2].isoformat(),
             "sources": sources,
+            "join_analysis": project[3],
         }
+
+    def get_project_source_files(self, project_id: UUID) -> list[dict[str, Any]]:
+        with psycopg.connect(self.database_url) as connection:
+            rows = connection.execute(
+                """
+                SELECT ps.position, d.id, d.stored_name, d.columns_json,
+                       ps.commune_column, ps.year_column
+                FROM project_sources ps
+                JOIN datasets d ON d.id = ps.dataset_id
+                WHERE ps.project_id = %s
+                ORDER BY ps.position
+                """,
+                (project_id,),
+            ).fetchall()
+        if not rows:
+            raise LookupError("Projet introuvable ou sans source.")
+        return [
+            {
+                "position": row[0],
+                "id": str(row[1]),
+                "stored_name": row[2],
+                "columns": row[3],
+                "commune_column": row[4],
+                "year_column": row[5],
+            }
+            for row in rows
+        ]
+
+    def set_dimensions(
+        self,
+        project_id: UUID,
+        configurations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        sources = self.get_project_source_files(project_id)
+        if len(sources) != 2:
+            raise ValueError("Ajoutez deux sources avant de choisir les colonnes.")
+        expected_ids = {source["id"] for source in sources}
+        configured_ids = {str(item["dataset_id"]) for item in configurations}
+        if configured_ids != expected_ids or len(configurations) != 2:
+            raise ValueError("Les colonnes doivent être choisies pour les deux sources du projet.")
+
+        source_by_id = {source["id"]: source for source in sources}
+        with psycopg.connect(self.database_url) as connection:
+            for item in configurations:
+                dataset_id = str(item["dataset_id"])
+                column_names = {
+                    column["name"] for column in source_by_id[dataset_id]["columns"]
+                }
+                commune_column = item["commune_column"]
+                year_column = item.get("year_column")
+                if commune_column not in column_names:
+                    raise ValueError(f"Colonne commune introuvable : {commune_column}")
+                if year_column and year_column not in column_names:
+                    raise ValueError(f"Colonne année introuvable : {year_column}")
+                connection.execute(
+                    """
+                    UPDATE project_sources
+                    SET commune_column = %s, year_column = %s
+                    WHERE project_id = %s AND dataset_id = %s
+                    """,
+                    (commune_column, year_column, project_id, UUID(dataset_id)),
+                )
+            connection.execute(
+                "UPDATE projects SET join_analysis_json = NULL WHERE id = %s",
+                (project_id,),
+            )
+        return self.get_project(project_id)
+
+    def save_join_analysis(self, project_id: UUID, analysis: dict[str, Any]) -> None:
+        with psycopg.connect(self.database_url) as connection:
+            result = connection.execute(
+                "UPDATE projects SET join_analysis_json = %s WHERE id = %s",
+                (Jsonb(analysis), project_id),
+            )
+            if result.rowcount == 0:
+                raise LookupError("Projet introuvable.")

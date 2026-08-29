@@ -27,7 +27,10 @@ L’utilisateur décrit les données qu’il recherche sans connaître les catal
 - choisit et télécharge automatiquement la meilleure ressource disponible ;
 - conserve le fichier original et son empreinte SHA-256 ;
 - affiche le nombre de lignes, les colonnes, leurs types et un aperçu ;
-- conserve une première source dans un projet puis permet d’y ajouter une deuxième source.
+- conserve une première source dans un projet puis permet d’y ajouter une deuxième source ;
+- suggère, sans l’imposer, les colonnes « commune » et « année » à partir de leur nom et d’exemples ;
+- mesure le croisement confirmé : clés appariées, taux par source, doublons et exemples non appariés ;
+- refuse d’inventer une année absente et explique quand la comparaison se limite à la commune.
 
 ## Hors périmètre
 

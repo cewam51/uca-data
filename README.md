@@ -25,9 +25,11 @@ Permettre à une personne sans compétences techniques de :
 
 Le site recherche actuellement dans data.gouv.fr, data.europa.eu et Recherche Data Gouv. Il affiche uniquement les résultats qui contiennent une table publique exploitable ou vérifiable, choisit automatiquement la meilleure ressource CSV ou TSV et l’ajoute au projet sans demander de fichier à l’utilisateur. Les résultats non tabulaires ou restreints ne sont pas affichés. Chaque fichier retenu est téléchargé côté serveur, conservé sans modification, analysé avec DuckDB et identifié par son empreinte SHA-256.
 
-Une première source crée un projet persistant. L’utilisateur peut ensuite lancer une nouvelle recherche et ajouter une seconde source ; les deux jeux de données restent ordonnés dans le projet avec leur titre, producteur, provenance, structure et empreinte.
+Une première source crée un projet persistant et ajoute son identifiant à l’adresse de la page. L’utilisateur peut ensuite lancer une nouvelle recherche et ajouter une seconde source ; les deux jeux de données restent ordonnés dans le projet avec leur titre, producteur, provenance, structure et empreinte, y compris après un rechargement de la page.
 
-Étapes suivantes : identification sémantique des colonnes, croisement de plusieurs sources, calcul d’indicateurs, visualisations Vega-Lite et fiches collaboratives versionnées.
+Avec deux sources, le site suggère les colonnes susceptibles de représenter la commune et l’année à partir de leur nom et de valeurs d’exemple. L’utilisateur confirme explicitement ses choix. Le site calcule ensuite le nombre de clés appariées, les taux de correspondance dans chaque source, les clés répétées et quelques valeurs non retrouvées. Une année absente n’est jamais inventée : le croisement est limité à la commune et une alerte l’explique.
+
+Étapes suivantes : choix de l’agrégation et des valeurs à comparer, calcul d’indicateurs, visualisations et fiches collaboratives versionnées.
 
 Stack : Next.js/TypeScript, FastAPI/Python, DuckDB et PostgreSQL.
 

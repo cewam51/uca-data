@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type SearchResult = {
   id: string;
@@ -23,7 +23,14 @@ type SearchResponse = {
   results: SearchResult[];
 };
 
-type Column = { name: string; type: string };
+type Column = {
+  name: string;
+  type: string;
+  non_null_count?: number;
+  distinct_count?: number;
+  samples?: unknown[];
+  suggested_roles?: string[];
+};
 type Dataset = {
   id: string;
   original_name: string;
@@ -40,6 +47,21 @@ type ProjectSource = Omit<Dataset, "preview" | "catalog_source"> & {
   catalog_source?: string;
   title: string;
   publisher?: string | null;
+  dimensions?: { commune: string | null; année: string | null };
+};
+
+type JoinAnalysis = {
+  dimensions: string[];
+  left_distinct_keys: number;
+  right_distinct_keys: number;
+  matched_keys: number;
+  left_match_rate: number;
+  right_match_rate: number;
+  left_duplicate_keys: number;
+  right_duplicate_keys: number;
+  left_unmatched_samples: { commune: string; année: string | null }[];
+  right_unmatched_samples: { commune: string; année: string | null }[];
+  warnings: string[];
 };
 
 type Project = {
@@ -47,6 +69,7 @@ type Project = {
   title: string;
   created_at: string;
   sources: ProjectSource[];
+  join_analysis?: JoinAnalysis | null;
 };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -60,6 +83,22 @@ export default function Home() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [exploring, setExploring] = useState("");
+
+  useEffect(() => {
+    const projectId = new URLSearchParams(window.location.search).get("project");
+    if (!projectId) return;
+    let active = true;
+    fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}`)
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail ?? "Le projet n’a pas pu être retrouvé.");
+        if (active) setProject(body);
+      })
+      .catch((reason) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Le projet n’a pas pu être retrouvé.");
+      });
+    return () => { active = false; };
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -128,6 +167,7 @@ export default function Home() {
       const projectBody = await projectResponse.json();
       if (!projectResponse.ok) throw new Error(projectBody.detail ?? "La source n’a pas pu être ajoutée au projet.");
       setProject(projectBody);
+      window.history.replaceState({}, "", `${window.location.pathname}?project=${encodeURIComponent(projectBody.id)}`);
       setDataset(body);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (reason) {
@@ -146,6 +186,7 @@ export default function Home() {
         <DatasetResult
           dataset={dataset}
           project={project}
+          onProjectChange={setProject}
           onAddSecond={() => {
             setDataset(null);
             setSearch(null);
@@ -153,6 +194,23 @@ export default function Home() {
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
         />
+      </main>
+    );
+  }
+
+  if (project?.sources.length === 2) {
+    return (
+      <main>
+        <header>
+          <p className="eyebrow">Explorateur de données publiques</p>
+          <h1>Vérifier que les sources parlent des mêmes lieux.</h1>
+          <p className="intro">Choisissez les colonnes comparables. Le site mesure ensuite les correspondances et signale ce qui demande votre attention.</p>
+        </header>
+        <Journey project={project} />
+        <ProjectSources project={project} />
+        <section className="dataset-view workspace-view">
+          <ColumnQualification project={project} onProjectChange={setProject} />
+        </section>
       </main>
     );
   }
@@ -167,11 +225,7 @@ export default function Home() {
           : "Écrivez simplement ce que vous cherchez. Le site s’occupe de trouver et d’ouvrir les fichiers techniques."}</p>
       </header>
 
-      <div className="journey" aria-label="Parcours de création">
-        <span className="active"><b>1</b>Trouver des données</span>
-        <span className={project ? "active" : ""}><b>2</b>Ajouter une deuxième source</span>
-        <span><b>3</b>Créer un graphique</span>
-      </div>
+      <Journey project={project} />
 
       {project && <ProjectSources project={project} compact />}
 
@@ -250,6 +304,17 @@ function SearchResults({
   );
 }
 
+function Journey({ project }: { project: Project | null }) {
+  return (
+    <div className="journey" aria-label="Parcours de création">
+      <span className="active"><b>1</b>Trouver des données</span>
+      <span className={project ? "active" : ""}><b>2</b>Ajouter une deuxième source</span>
+      <span className={project?.sources.length === 2 ? "active" : ""}><b>3</b>Vérifier le croisement</span>
+      <span><b>4</b>Créer un indicateur</span>
+    </div>
+  );
+}
+
 function ResultCard({
   result,
   exploring,
@@ -297,10 +362,12 @@ function DatasetResult({
   dataset,
   project,
   onAddSecond,
+  onProjectChange,
 }: {
   dataset: Dataset;
   project: Project | null;
   onAddSecond: () => void;
+  onProjectChange: (project: Project) => void;
 }) {
   return (
     <section className="dataset-view">
@@ -321,10 +388,7 @@ function DatasetResult({
           {project.sources.length < 2 ? (
             <button className="add-source" onClick={onAddSecond}>Ajouter une deuxième source</button>
           ) : (
-            <div className="project-ready" role="status">
-              <strong>Deux sources sont prêtes.</strong>
-              <span>Étape suivante : choisir les colonnes qui représentent la commune et l’année.</span>
-            </div>
+            <ColumnQualification project={project} onProjectChange={onProjectChange} />
           )}
         </>
       )}
@@ -371,6 +435,231 @@ function ProjectSources({ project, compact = false }: { project: Project; compac
       </div>
     </section>
   );
+}
+
+function ColumnQualification({
+  project,
+  onProjectChange,
+}: {
+  project: Project;
+  onProjectChange: (project: Project) => void;
+}) {
+  const [qualified, setQualified] = useState<Project | null>(null);
+  const [choices, setChoices] = useState<Record<string, { commune: string; year: string }>>({});
+  const [join, setJoin] = useState<JoinAnalysis | null>(project.join_analysis ?? null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function loadQualification() {
+      try {
+        const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(project.id)}/qualification`);
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail ?? "Les colonnes n’ont pas pu être analysées.");
+        if (!active) return;
+        const analyzed = body as Project;
+        const initial = Object.fromEntries(analyzed.sources.map((source) => [
+          source.id,
+          {
+            commune: source.dimensions?.commune ?? bestSuggestedColumn(source.columns, "commune"),
+            year: source.dimensions?.année ?? bestSuggestedColumn(source.columns, "année"),
+          },
+        ]));
+        setQualified(analyzed);
+        setChoices(initial);
+        setJoin(analyzed.join_analysis ?? null);
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Les colonnes n’ont pas pu être analysées.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    loadQualification();
+    return () => { active = false; };
+  }, [project.id]);
+
+  async function verifyJoin() {
+    if (!qualified || qualified.sources.some((source) => !choices[source.id]?.commune)) {
+      setError("Choisissez une colonne commune dans chaque source.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const dimensionsResponse = await fetch(
+        `${apiUrl}/api/projects/${encodeURIComponent(project.id)}/dimensions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sources: qualified.sources.map((source) => ({
+              dataset_id: source.id,
+              commune_column: choices[source.id].commune,
+              year_column: choices[source.id].year || null,
+            })),
+          }),
+        },
+      );
+      const savedProject = await dimensionsResponse.json();
+      if (!dimensionsResponse.ok) throw new Error(savedProject.detail ?? "Les choix n’ont pas pu être enregistrés.");
+
+      const analysisResponse = await fetch(
+        `${apiUrl}/api/projects/${encodeURIComponent(project.id)}/join-analysis`,
+        { method: "POST" },
+      );
+      const analysis = await analysisResponse.json();
+      if (!analysisResponse.ok) throw new Error(analysis.detail ?? "Le croisement n’a pas pu être vérifié.");
+      setJoin(analysis);
+      onProjectChange({ ...savedProject, join_analysis: analysis });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Le croisement n’a pas pu être vérifié.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <p className="qualification-loading" role="status">Analyse des colonnes…</p>;
+  if (!qualified) return <p className="error" role="alert">{error}</p>;
+  const missingYear = qualified.sources.some((source) => !choices[source.id]?.year);
+
+  return (
+    <section className="qualification" aria-labelledby="qualification-title">
+      <div className="qualification-heading">
+        <div>
+          <p className="eyebrow">Étape 3</p>
+          <h2 id="qualification-title">Quelles colonnes désignent le même lieu ?</h2>
+        </div>
+        <p>Les suggestions sont automatiques. Vérifiez-les à partir des exemples avant de continuer.</p>
+      </div>
+
+      <div className="qualification-grid">
+        {qualified.sources.map((source, index) => {
+          const selection = choices[source.id] ?? { commune: "", year: "" };
+          return (
+            <fieldset className="qualification-source" key={source.id}>
+              <legend>Source {index + 1} · {source.title}</legend>
+              <label>
+                Colonne de la commune
+                <select
+                  value={selection.commune}
+                  onChange={(event) => setChoices((current) => ({
+                    ...current,
+                    [source.id]: { ...selection, commune: event.target.value },
+                  }))}
+                >
+                  <option value="">Choisir une colonne</option>
+                  {source.columns.map((column) => (
+                    <option value={column.name} key={column.name}>
+                      {column.name}{column.suggested_roles?.includes("commune") ? " · suggérée" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ColumnDetails column={source.columns.find((column) => column.name === selection.commune)} />
+
+              <label>
+                Colonne de l’année
+                <select
+                  value={selection.year}
+                  onChange={(event) => setChoices((current) => ({
+                    ...current,
+                    [source.id]: { ...selection, year: event.target.value },
+                  }))}
+                >
+                  <option value="">Aucune année dans cette source</option>
+                  {source.columns.map((column) => (
+                    <option value={column.name} key={column.name}>
+                      {column.name}{column.suggested_roles?.includes("année") ? " · suggérée" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ColumnDetails column={source.columns.find((column) => column.name === selection.year)} />
+            </fieldset>
+          );
+        })}
+      </div>
+
+      {missingYear && (
+        <p className="quality-note">
+          Une année manque dans au moins une source. Elle ne sera pas inventée : le premier contrôle portera seulement sur la commune.
+        </p>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+      <button onClick={verifyJoin} disabled={saving}>
+        {saving ? "Vérification du croisement…" : "Vérifier le croisement"}
+      </button>
+      {join && <JoinQuality analysis={join} sources={qualified.sources} />}
+    </section>
+  );
+}
+
+function ColumnDetails({ column }: { column?: Column }) {
+  if (!column) return <p className="column-help">Choisissez une colonne pour voir des exemples.</p>;
+  const samples = column.samples?.map((sample) => String(sample)).join(" · ") || "aucune valeur";
+  return (
+    <p className="column-help">
+      <span>{translateType(column.type)}</span>
+      <span>{column.distinct_count?.toLocaleString("fr-FR")} valeurs différentes</span>
+      <strong>Exemples : {samples}</strong>
+    </p>
+  );
+}
+
+function JoinQuality({ analysis, sources }: { analysis: JoinAnalysis; sources: ProjectSource[] }) {
+  return (
+    <section className="join-quality" aria-labelledby="join-title">
+      <div className="join-heading">
+        <div>
+          <p className="eyebrow">Contrôle du croisement</p>
+          <h3 id="join-title">{analysis.matched_keys.toLocaleString("fr-FR")} clés correspondent</h3>
+        </div>
+        <span>Sur {analysis.dimensions.join(" + ")}</span>
+      </div>
+      <div className="match-metrics">
+        <div><span>Source 1 retrouvée</span><strong>{analysis.left_match_rate.toLocaleString("fr-FR")} %</strong></div>
+        <div><span>Source 2 retrouvée</span><strong>{analysis.right_match_rate.toLocaleString("fr-FR")} %</strong></div>
+        <div><span>Clés répétées</span><strong>{analysis.left_duplicate_keys + analysis.right_duplicate_keys}</strong></div>
+      </div>
+      {analysis.warnings.length > 0 && (
+        <div className="warnings">
+          {analysis.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+        </div>
+      )}
+      {(analysis.left_unmatched_samples.length > 0 || analysis.right_unmatched_samples.length > 0) && (
+        <details>
+          <summary>Voir quelques communes non retrouvées</summary>
+          <div className="unmatched-grid">
+            {[analysis.left_unmatched_samples, analysis.right_unmatched_samples].map((items, index) => (
+              <div key={sources[index].id}>
+                <strong>{sources[index].title}</strong>
+                {items.length ? (
+                  <ul>{items.map((item) => <li key={`${item.commune}-${item.année}`}>{item.commune}{item.année ? ` · ${item.année}` : ""}</li>)}</ul>
+                ) : <p>Aucun exemple non apparié.</p>}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function translateType(value: string) {
+  if (["BIGINT", "INTEGER", "SMALLINT", "DOUBLE", "DECIMAL"].some((type) => value.startsWith(type))) return "Nombre";
+  if (value === "DATE" || value.startsWith("TIMESTAMP")) return "Date";
+  if (value === "BOOLEAN") return "Oui / non";
+  return "Texte";
+}
+
+function bestSuggestedColumn(columns: Column[], role: string) {
+  const suggested = columns.filter((column) => column.suggested_roles?.includes(role));
+  const exactNames = role === "commune" ? ["commune", "ville"] : ["année", "annee", "year"];
+  return suggested.find((column) => exactNames.includes(column.name.toLocaleLowerCase("fr-FR")))?.name
+    ?? suggested[0]?.name
+    ?? "";
 }
 
 function formatDate(value: string) {

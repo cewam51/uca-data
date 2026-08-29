@@ -16,10 +16,12 @@ from .catalog_importer import (
 from .catalogs import search_catalogs
 from .config import settings
 from .repository import PostgresDatasetRepository
+from .project_service import ProjectAnalysisService
 from .service import CsvUploadService, UploadTooLargeError
 
 
 repository = PostgresDatasetRepository(settings.database_url)
+project_analysis = ProjectAnalysisService(settings.upload_dir, repository)
 
 
 class ProjectCreate(BaseModel):
@@ -33,6 +35,16 @@ class ProjectSourceCreate(BaseModel):
     dataset_id: UUID
     source_title: str = Field(min_length=1, max_length=500)
     source_publisher: str | None = Field(default=None, max_length=300)
+
+
+class SourceDimensions(BaseModel):
+    dataset_id: UUID
+    commune_column: str = Field(min_length=1, max_length=300)
+    year_column: str | None = Field(default=None, max_length=300)
+
+
+class ProjectDimensions(BaseModel):
+    sources: list[SourceDimensions] = Field(min_length=2, max_length=2)
 
 
 @asynccontextmanager
@@ -98,6 +110,44 @@ def add_project_source(project_id: UUID, payload: ProjectSourceCreate) -> dict:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/qualification")
+def qualify_project_columns(project_id: UUID) -> dict:
+    try:
+        return project_analysis.qualification(project_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/dimensions")
+def save_project_dimensions(project_id: UUID, payload: ProjectDimensions) -> dict:
+    configurations = [
+        {
+            "dataset_id": source.dataset_id,
+            "commune_column": source.commune_column.strip(),
+            "year_column": source.year_column.strip() if source.year_column else None,
+        }
+        for source in payload.sources
+    ]
+    try:
+        return repository.set_dimensions(project_id, configurations)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/join-analysis")
+def analyze_project_join(project_id: UUID) -> dict:
+    try:
+        return project_analysis.analyze_join(project_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get("/api/search")
