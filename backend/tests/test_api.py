@@ -32,6 +32,7 @@ def test_project_can_receive_two_persisted_sources():
     assert "get" in paths["/api/projects/{project_id}/qualification"]
     assert "post" in paths["/api/projects/{project_id}/dimensions"]
     assert "post" in paths["/api/projects/{project_id}/join-analysis"]
+    assert "post" in paths["/api/projects/{project_id}/indicator"]
 
 
 def test_upload_keeps_original_and_returns_analysis(tmp_path: Path):

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from typing import Literal
 from uuid import UUID
 
 import httpx
@@ -45,6 +46,18 @@ class SourceDimensions(BaseModel):
 
 class ProjectDimensions(BaseModel):
     sources: list[SourceDimensions] = Field(min_length=2, max_length=2)
+
+
+class IndicatorSource(BaseModel):
+    dataset_id: UUID
+    value_column: str = Field(min_length=1, max_length=300)
+    aggregation: Literal["sum", "average", "minimum", "maximum", "count"]
+
+
+class IndicatorCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    operation: Literal["ratio_percent", "difference"]
+    sources: list[IndicatorSource] = Field(min_length=2, max_length=2)
 
 
 @asynccontextmanager
@@ -144,6 +157,31 @@ def save_project_dimensions(project_id: UUID, payload: ProjectDimensions) -> dic
 def analyze_project_join(project_id: UUID) -> dict:
     try:
         return project_analysis.analyze_join(project_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/indicator", status_code=201)
+def create_project_indicator(project_id: UUID, payload: IndicatorCreate) -> dict:
+    title = payload.title.strip()
+    if len(title) < 2:
+        raise HTTPException(status_code=422, detail="Le nom de l’indicateur est trop court.")
+    try:
+        return project_analysis.calculate_indicator(
+            project_id,
+            title,
+            payload.operation,
+            [
+                {
+                    "dataset_id": source.dataset_id,
+                    "value_column": source.value_column.strip(),
+                    "aggregation": source.aggregation,
+                }
+                for source in payload.sources
+            ],
+        )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:

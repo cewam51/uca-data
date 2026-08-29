@@ -44,7 +44,8 @@ class PostgresDatasetRepository:
                     id UUID PRIMARY KEY,
                     title TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL,
-                    join_analysis_json JSONB
+                    join_analysis_json JSONB,
+                    indicator_json JSONB
                 )
                 """
             )
@@ -78,6 +79,9 @@ class PostgresDatasetRepository:
             )
             connection.execute(
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS join_analysis_json JSONB"
+            )
+            connection.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS indicator_json JSONB"
             )
 
     def save(self, dataset: dict[str, Any]) -> None:
@@ -193,7 +197,10 @@ class PostgresDatasetRepository:
     def get_project(self, project_id: UUID) -> dict[str, Any]:
         with psycopg.connect(self.database_url) as connection:
             project = connection.execute(
-                "SELECT id, title, created_at, join_analysis_json FROM projects WHERE id = %s",
+                """
+                SELECT id, title, created_at, join_analysis_json, indicator_json
+                FROM projects WHERE id = %s
+                """,
                 (project_id,),
             ).fetchone()
             if project is None:
@@ -237,6 +244,7 @@ class PostgresDatasetRepository:
             "created_at": project[2].isoformat(),
             "sources": sources,
             "join_analysis": project[3],
+            "indicator": project[4],
         }
 
     def get_project_source_files(self, project_id: UUID) -> list[dict[str, Any]]:
@@ -301,7 +309,11 @@ class PostgresDatasetRepository:
                     (commune_column, year_column, project_id, UUID(dataset_id)),
                 )
             connection.execute(
-                "UPDATE projects SET join_analysis_json = NULL WHERE id = %s",
+                """
+                UPDATE projects
+                SET join_analysis_json = NULL, indicator_json = NULL
+                WHERE id = %s
+                """,
                 (project_id,),
             )
         return self.get_project(project_id)
@@ -311,6 +323,15 @@ class PostgresDatasetRepository:
             result = connection.execute(
                 "UPDATE projects SET join_analysis_json = %s WHERE id = %s",
                 (Jsonb(analysis), project_id),
+            )
+            if result.rowcount == 0:
+                raise LookupError("Projet introuvable.")
+
+    def save_indicator(self, project_id: UUID, indicator: dict[str, Any]) -> None:
+        with psycopg.connect(self.database_url) as connection:
+            result = connection.execute(
+                "UPDATE projects SET indicator_json = %s WHERE id = %s",
+                (Jsonb(indicator), project_id),
             )
             if result.rowcount == 0:
                 raise LookupError("Projet introuvable.")

@@ -16,6 +16,17 @@ COMMUNE_TERMS = (
     "ville",
 )
 YEAR_TERMS = ("annee", "year", "millesime", "exercice")
+AGGREGATIONS = {
+    "sum": ("sum", "Somme"),
+    "average": ("avg", "Moyenne"),
+    "minimum": ("min", "Minimum"),
+    "maximum": ("max", "Maximum"),
+    "count": ("count", "Nombre de valeurs"),
+}
+OPERATIONS = {
+    "ratio_percent": "Rapport en pourcentage",
+    "difference": "Différence",
+}
 
 
 def analyze_csv(path: Path, preview_limit: int = 20) -> dict[str, Any]:
@@ -165,6 +176,167 @@ def analyze_join(
         connection.close()
 
 
+def calculate_indicator(
+    left_path: Path,
+    right_path: Path,
+    left_commune: str,
+    right_commune: str,
+    left_value: str,
+    right_value: str,
+    left_aggregation: str,
+    right_aggregation: str,
+    operation: str,
+    left_year: str | None = None,
+    right_year: str | None = None,
+    result_limit: int = 5000,
+) -> dict[str, Any]:
+    """Agrège deux mesures puis calcule un indicateur sur les seules clés appariées."""
+    if left_aggregation not in AGGREGATIONS or right_aggregation not in AGGREGATIONS:
+        raise ValueError("Agrégation non autorisée.")
+    if operation not in OPERATIONS:
+        raise ValueError("Formule d’indicateur non autorisée.")
+
+    connection = duckdb.connect(":memory:")
+    try:
+        left = connection.read_csv(str(left_path), header=True, auto_detect=True)
+        right = connection.read_csv(str(right_path), header=True, auto_detect=True)
+        for columns, commune, year, value in (
+            (left.columns, left_commune, left_year, left_value),
+            (right.columns, right_commune, right_year, right_value),
+        ):
+            _require_column(columns, commune)
+            _require_column(columns, value)
+            if year:
+                _require_column(columns, year)
+
+        uses_year = bool(left_year and right_year)
+        connection.register("left_source", left)
+        connection.register("right_source", right)
+        connection.execute(
+            f"CREATE TEMP TABLE left_all_keys AS "
+            f"{_key_query('left_source', left_commune, left_year if uses_year else None)}"
+        )
+        connection.execute(
+            f"CREATE TEMP TABLE right_all_keys AS "
+            f"{_key_query('right_source', right_commune, right_year if uses_year else None)}"
+        )
+        connection.execute(
+            f"CREATE TEMP TABLE left_values AS {_value_query('left_source', left_commune, left_year if uses_year else None, left_value, left_aggregation)}"
+        )
+        connection.execute(
+            f"CREATE TEMP TABLE right_values AS {_value_query('right_source', right_commune, right_year if uses_year else None, right_value, right_aggregation)}"
+        )
+
+        dimension_matches = connection.execute(
+            """
+            SELECT count(*) FROM left_all_keys l
+            INNER JOIN right_all_keys r USING (commune_key, year_key)
+            """
+        ).fetchone()[0]
+        value_matches = connection.execute(
+            """
+            SELECT count(*) FROM left_values l
+            INNER JOIN right_values r USING (commune_key, year_key)
+            """
+        ).fetchone()[0]
+        missing_values = dimension_matches - value_matches
+        rejected_left = connection.execute(
+            "SELECT coalesce(sum(rejected_rows), 0) FROM left_values"
+        ).fetchone()[0]
+        rejected_right = connection.execute(
+            "SELECT coalesce(sum(rejected_rows), 0) FROM right_values"
+        ).fetchone()[0]
+
+        value_expression = (
+            "(l.aggregated_value / r.aggregated_value) * 100.0"
+            if operation == "ratio_percent"
+            else "l.aggregated_value - r.aggregated_value"
+        )
+        denominator_condition = (
+            "AND r.aggregated_value <> 0" if operation == "ratio_percent" else ""
+        )
+        zero_denominators = (
+            connection.execute(
+                """
+                SELECT count(*) FROM left_values l
+                INNER JOIN right_values r USING (commune_key, year_key)
+                WHERE r.aggregated_value = 0
+                """
+            ).fetchone()[0]
+            if operation == "ratio_percent"
+            else 0
+        )
+        total_rows = value_matches - zero_denominators
+        result_rows = connection.execute(
+            f"""
+            SELECT l.commune_key, nullif(l.year_key, ''),
+                   l.aggregated_value, r.aggregated_value,
+                   {value_expression} AS indicator_value
+            FROM left_values l
+            INNER JOIN right_values r USING (commune_key, year_key)
+            WHERE l.aggregated_value IS NOT NULL
+              AND r.aggregated_value IS NOT NULL
+              {denominator_condition}
+            ORDER BY abs(indicator_value) DESC, l.commune_key, l.year_key
+            LIMIT ?
+            """,
+            [result_limit],
+        ).fetchall()
+
+        warnings = []
+        if missing_values:
+            warnings.append(
+                f"{missing_values} clé(s) appariée(s) ont été exclues car une valeur numérique manque dans au moins une source."
+            )
+        if rejected_left or rejected_right:
+            warnings.append(
+                f"{rejected_left + rejected_right} valeur(s) non numériques ont été ignorées pendant l’agrégation."
+            )
+        if zero_denominators:
+            warnings.append(
+                f"{zero_denominators} résultat(s) ont été exclus car le dénominateur vaut zéro."
+            )
+        if total_rows > result_limit:
+            warnings.append(
+                f"Le projet contient {total_rows} résultats ; les {result_limit} valeurs les plus éloignées de zéro sont conservées dans cet aperçu."
+            )
+
+        left_label = AGGREGATIONS[left_aggregation][1]
+        right_label = AGGREGATIONS[right_aggregation][1]
+        left_term = f"{left_label} de « {left_value} » (source 1)"
+        right_term = f"{right_label} de « {right_value} » (source 2)"
+        formula = (
+            f"({left_term} ÷ {right_term}) × 100"
+            if operation == "ratio_percent"
+            else f"{left_term} − {right_term}"
+        )
+        return {
+            "operation": operation,
+            "operation_label": OPERATIONS[operation],
+            "unit": "%" if operation == "ratio_percent" else "écart",
+            "formula": formula,
+            "dimensions": ["commune", *(["année"] if uses_year else [])],
+            "dimension_matches": dimension_matches,
+            "result_count": total_rows,
+            "displayed_count": len(result_rows),
+            "excluded_missing_values": missing_values,
+            "excluded_zero_denominator": zero_denominators,
+            "warnings": warnings,
+            "rows": [
+                {
+                    "commune": row[0],
+                    "année": row[1],
+                    "source_1_value": _rounded(row[2]),
+                    "source_2_value": _rounded(row[3]),
+                    "value": _rounded(row[4]),
+                }
+                for row in result_rows
+            ],
+        }
+    finally:
+        connection.close()
+
+
 def _suggest_roles(name: str, column_type: str, samples: list[Any]) -> list[str]:
     normalized = _normalize_label(name)
     roles = []
@@ -206,6 +378,43 @@ def _key_query(relation: str, commune: str, year: str | None) -> str:
     """
 
 
+def _value_query(
+    relation: str,
+    commune: str,
+    year: str | None,
+    value: str,
+    aggregation: str,
+) -> str:
+    commune_identifier = _quote_identifier(commune)
+    value_identifier = _quote_identifier(value)
+    numeric_value = f"try_cast({value_identifier} AS DOUBLE)"
+    aggregate_sql = AGGREGATIONS[aggregation][0]
+    commune_key = (
+        f"upper(trim(regexp_replace(CAST({commune_identifier} AS VARCHAR), "
+        "'\\s+', ' ', 'g')))"
+    )
+    year_key = "''"
+    conditions = [
+        f"{commune_identifier} IS NOT NULL",
+        f"trim(CAST({commune_identifier} AS VARCHAR)) <> ''",
+    ]
+    if year:
+        year_identifier = _quote_identifier(year)
+        year_key = f"trim(CAST({year_identifier} AS VARCHAR))"
+        conditions.extend(
+            [f"{year_identifier} IS NOT NULL", f"trim(CAST({year_identifier} AS VARCHAR)) <> ''"]
+        )
+    return f"""
+        SELECT {commune_key} AS commune_key, {year_key} AS year_key,
+               {aggregate_sql}({numeric_value}) AS aggregated_value,
+               count(*) - count({numeric_value}) AS rejected_rows
+        FROM {relation}
+        WHERE {' AND '.join(conditions)}
+        GROUP BY commune_key, year_key
+        HAVING count({numeric_value}) > 0
+    """
+
+
 def _unmatched_samples(
     connection: duckdb.DuckDBPyConnection,
     source_table: str,
@@ -226,6 +435,10 @@ def _unmatched_samples(
 
 def _rate(matched: int, total: int) -> float:
     return round((matched / total * 100) if total else 0, 1)
+
+
+def _rounded(value: float) -> float:
+    return round(float(value), 6)
 
 
 def _require_column(columns: list[str], name: str) -> None:

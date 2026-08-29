@@ -29,7 +29,9 @@ Une première source crée un projet persistant et ajoute son identifiant à l�
 
 Avec deux sources, le site suggère les colonnes susceptibles de représenter la commune et l’année à partir de leur nom et de valeurs d’exemple. L’utilisateur confirme explicitement ses choix. Le site calcule ensuite le nombre de clés appariées, les taux de correspondance dans chaque source, les clés répétées et quelques valeurs non retrouvées. Une année absente n’est jamais inventée : le croisement est limité à la commune et une alerte l’explique.
 
-Étapes suivantes : choix de l’agrégation et des valeurs à comparer, calcul d’indicateurs, visualisations et fiches collaboratives versionnées.
+Lorsque le croisement contient des correspondances, l’utilisateur choisit une valeur numérique et une agrégation pour chaque source, puis une formule : rapport en pourcentage ou différence. Le calcul est effectué sur les clés appariées seulement. La formule exacte, les exclusions, les valeurs agrégées et le résultat restent visibles avec un graphique en barres et un tableau de contrôle. Les choix et le résultat sont conservés dans le projet avec les empreintes des deux sources.
+
+Étape suivante : publication de fiches collaboratives sourcées et versionnées.
 
 Stack : Next.js/TypeScript, FastAPI/Python, DuckDB et PostgreSQL.
 

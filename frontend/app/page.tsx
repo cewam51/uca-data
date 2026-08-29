@@ -64,12 +64,45 @@ type JoinAnalysis = {
   warnings: string[];
 };
 
+type IndicatorRow = {
+  commune: string;
+  année: string | null;
+  source_1_value: number;
+  source_2_value: number;
+  value: number;
+};
+
+type IndicatorResult = {
+  title: string;
+  created_at: string;
+  operation: "ratio_percent" | "difference";
+  operation_label: string;
+  unit: string;
+  formula: string;
+  dimensions: string[];
+  dimension_matches: number;
+  result_count: number;
+  displayed_count: number;
+  excluded_missing_values: number;
+  excluded_zero_denominator: number;
+  warnings: string[];
+  rows: IndicatorRow[];
+  sources: {
+    dataset_id: string;
+    title: string;
+    sha256: string;
+    value_column: string;
+    aggregation: string;
+  }[];
+};
+
 type Project = {
   id: string;
   title: string;
   created_at: string;
   sources: ProjectSource[];
   join_analysis?: JoinAnalysis | null;
+  indicator?: IndicatorResult | null;
 };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -310,7 +343,7 @@ function Journey({ project }: { project: Project | null }) {
       <span className="active"><b>1</b>Trouver des données</span>
       <span className={project ? "active" : ""}><b>2</b>Ajouter une deuxième source</span>
       <span className={project?.sources.length === 2 ? "active" : ""}><b>3</b>Vérifier le croisement</span>
-      <span><b>4</b>Créer un indicateur</span>
+      <span className={project?.indicator ? "active" : ""}><b>4</b>Créer un indicateur</span>
     </div>
   );
 }
@@ -591,7 +624,25 @@ function ColumnQualification({
       <button onClick={verifyJoin} disabled={saving}>
         {saving ? "Vérification du croisement…" : "Vérifier le croisement"}
       </button>
-      {join && <JoinQuality analysis={join} sources={qualified.sources} />}
+      {join && (
+        <>
+          <JoinQuality analysis={join} sources={qualified.sources} />
+          {join.matched_keys > 0 ? (
+            <IndicatorBuilder
+              project={qualified}
+              existing={qualified.indicator ?? project.indicator ?? null}
+              onIndicatorChange={(indicator) => {
+                setQualified((current) => current ? { ...current, indicator } : current);
+                onProjectChange({ ...project, join_analysis: join, indicator });
+              }}
+            />
+          ) : (
+            <p className="indicator-blocked">
+              Aucun indicateur ne sera calculé avec ces choix, car aucune commune ne correspond. Changez les colonnes ou remplacez une source.
+            </p>
+          )}
+        </>
+      )}
     </section>
   );
 }
@@ -645,6 +696,278 @@ function JoinQuality({ analysis, sources }: { analysis: JoinAnalysis; sources: P
       )}
     </section>
   );
+}
+
+const aggregationLabels: Record<string, string> = {
+  sum: "Somme",
+  average: "Moyenne",
+  minimum: "Minimum",
+  maximum: "Maximum",
+  count: "Nombre de valeurs",
+};
+
+function IndicatorBuilder({
+  project,
+  existing,
+  onIndicatorChange,
+}: {
+  project: Project;
+  existing: IndicatorResult | null;
+  onIndicatorChange: (indicator: IndicatorResult) => void;
+}) {
+  const existingBySource = Object.fromEntries(
+    (existing?.sources ?? []).map((source) => [source.dataset_id, source]),
+  );
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
+    project.sources.map((source) => [
+      source.id,
+      existingBySource[source.id]?.value_column ?? bestMeasureColumn(source),
+    ]),
+  ));
+  const [aggregations, setAggregations] = useState<Record<string, string>>(() => Object.fromEntries(
+    project.sources.map((source) => [
+      source.id,
+      existingBySource[source.id]?.aggregation ?? "sum",
+    ]),
+  ));
+  const [operation, setOperation] = useState<"ratio_percent" | "difference">(
+    existing?.operation ?? "ratio_percent",
+  );
+  const [title, setTitle] = useState(existing?.title ?? "Comparaison des deux sources");
+  const [result, setResult] = useState<IndicatorResult | null>(existing);
+  const [calculating, setCalculating] = useState(false);
+  const [error, setError] = useState("");
+  const missingMeasure = project.sources.some((source) => !values[source.id]);
+
+  async function calculate() {
+    if (missingMeasure) {
+      setError("Choisissez une colonne de valeur dans chaque source.");
+      return;
+    }
+    setCalculating(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `${apiUrl}/api/projects/${encodeURIComponent(project.id)}/indicator`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title.trim() || "Comparaison des deux sources",
+            operation,
+            sources: project.sources.map((source) => ({
+              dataset_id: source.id,
+              value_column: values[source.id],
+              aggregation: aggregations[source.id],
+            })),
+          }),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "L’indicateur n’a pas pu être calculé.");
+      setResult(body);
+      onIndicatorChange(body);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "L’indicateur n’a pas pu être calculé.");
+    } finally {
+      setCalculating(false);
+    }
+  }
+
+  return (
+    <section className="indicator-builder" aria-labelledby="indicator-builder-title">
+      <div className="indicator-heading">
+        <div>
+          <p className="eyebrow">Étape 4</p>
+          <h3 id="indicator-builder-title">Construire un indicateur vérifiable</h3>
+        </div>
+        <p>Choisissez ce qui doit être agrégé dans chaque source, puis la formule qui les relie.</p>
+      </div>
+
+      <label className="indicator-title">
+        Nom de l’indicateur
+        <input value={title} maxLength={160} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+
+      <div className="indicator-source-grid">
+        {project.sources.map((source, index) => {
+          const candidates = source.columns.filter((column) => isNumericMeasure(column, source));
+          return (
+            <fieldset className="indicator-source" key={source.id}>
+              <legend>Source {index + 1} · {source.title}</legend>
+              <label>
+                Valeur à utiliser
+                <select
+                  value={values[source.id] ?? ""}
+                  onChange={(event) => setValues((current) => ({ ...current, [source.id]: event.target.value }))}
+                >
+                  <option value="">Choisir une valeur numérique</option>
+                  {candidates.map((column) => <option value={column.name} key={column.name}>{column.name}</option>)}
+                </select>
+              </label>
+              <ColumnDetails column={source.columns.find((column) => column.name === values[source.id])} />
+              <label>
+                Calcul par commune{source.dimensions?.année ? " et année" : ""}
+                <select
+                  value={aggregations[source.id] ?? "sum"}
+                  onChange={(event) => setAggregations((current) => ({ ...current, [source.id]: event.target.value }))}
+                >
+                  {Object.entries(aggregationLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                </select>
+              </label>
+            </fieldset>
+          );
+        })}
+      </div>
+
+      <fieldset className="operation-choice">
+        <legend>Comment relier les deux résultats ?</legend>
+        <label>
+          <input
+            type="radio"
+            name="operation"
+            checked={operation === "ratio_percent"}
+            onChange={() => setOperation("ratio_percent")}
+          />
+          <span><strong>Rapport en pourcentage</strong> Source 1 ÷ source 2 × 100</span>
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="operation"
+            checked={operation === "difference"}
+            onChange={() => setOperation("difference")}
+          />
+          <span><strong>Différence</strong> Source 1 − source 2</span>
+        </label>
+      </fieldset>
+
+      {error && <p className="error" role="alert">{error}</p>}
+      <button onClick={calculate} disabled={calculating || missingMeasure || title.trim().length < 2}>
+        {calculating ? "Calcul de l’indicateur…" : "Calculer et afficher"}
+      </button>
+      {result && <IndicatorView indicator={result} />}
+    </section>
+  );
+}
+
+function IndicatorView({ indicator }: { indicator: IndicatorResult }) {
+  return (
+    <section className="indicator-result" aria-labelledby="indicator-result-title">
+      <div className="indicator-result-heading">
+        <div>
+          <p className="eyebrow">Indicateur calculé</p>
+          <h3 id="indicator-result-title">{indicator.title}</h3>
+        </div>
+        <strong>{indicator.result_count.toLocaleString("fr-FR")} résultats</strong>
+      </div>
+      <div className="formula-box">
+        <span>Formule appliquée à chaque {indicator.dimensions.join(" + ")}</span>
+        <code>{indicator.formula}</code>
+      </div>
+      {indicator.warnings.length > 0 && (
+        <div className="warnings">{indicator.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>
+      )}
+      {indicator.rows.length ? (
+        <>
+          <IndicatorChart indicator={indicator} />
+          <details className="indicator-table-details">
+            <summary>Voir les valeurs du calcul</summary>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Commune</th><th>Année</th><th>Source 1</th><th>Source 2</th><th>Indicateur</th></tr></thead>
+                <tbody>
+                  {indicator.rows.slice(0, 100).map((row) => (
+                    <tr key={`${row.commune}-${row.année}`}>
+                      <td>{row.commune}</td>
+                      <td>{row.année ?? "—"}</td>
+                      <td>{formatNumber(row.source_1_value)}</td>
+                      <td>{formatNumber(row.source_2_value)}</td>
+                      <td>{formatIndicator(row.value, indicator.unit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </>
+      ) : (
+        <p className="indicator-empty">Aucun résultat calculable avec ces valeurs. Les exclusions ci-dessus expliquent pourquoi.</p>
+      )}
+    </section>
+  );
+}
+
+function IndicatorChart({ indicator }: { indicator: IndicatorResult }) {
+  const rows = indicator.rows.slice(0, 12);
+  const chartWidth = 920;
+  const labelWidth = 225;
+  const plotWidth = 570;
+  const rowHeight = 42;
+  const values = rows.map((row) => row.value);
+  const minimum = Math.min(0, ...values);
+  const maximum = Math.max(0, ...values);
+  const range = maximum - minimum || 1;
+  const zeroX = labelWidth + ((0 - minimum) / range) * plotWidth;
+  const chartHeight = rows.length * rowHeight + 38;
+
+  return (
+    <figure className="indicator-chart">
+      <figcaption>Valeurs les plus éloignées de zéro — jusqu’à 12 communes</figcaption>
+      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-labelledby="chart-title chart-description">
+        <title id="chart-title">{indicator.title}</title>
+        <desc id="chart-description">Graphique en barres de {rows.length} résultats, exprimés en {indicator.unit}.</desc>
+        <line x1={zeroX} x2={zeroX} y1="4" y2={chartHeight - 24} className="zero-line" />
+        {rows.map((row, index) => {
+          const y = index * rowHeight + 8;
+          const valueX = labelWidth + ((row.value - minimum) / range) * plotWidth;
+          const x = Math.min(zeroX, valueX);
+          const width = Math.max(2, Math.abs(valueX - zeroX));
+          const positive = row.value >= 0;
+          return (
+            <g key={`${row.commune}-${row.année}`}>
+              <text x="4" y={y + 12} className="chart-label">{truncateLabel(row.commune, 24)}{row.année ? ` · ${row.année}` : ""}</text>
+              <rect x={x} y={y} width={width} height="18" rx="3" className={positive ? "bar-positive" : "bar-negative"} />
+              <text
+                x={positive ? x + width + 7 : x - 7}
+                y={y + 12}
+                textAnchor={positive ? "start" : "end"}
+                className="chart-value"
+              >
+                {formatIndicator(row.value, indicator.unit)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </figure>
+  );
+}
+
+function isNumericMeasure(column: Column, source: ProjectSource) {
+  if (column.name === source.dimensions?.commune || column.name === source.dimensions?.année) return false;
+  return /^(U?TINYINT|U?SMALLINT|U?INTEGER|U?BIGINT|HUGEINT|FLOAT|DOUBLE|DECIMAL|REAL)/.test(column.type);
+}
+
+function bestMeasureColumn(source: ProjectSource) {
+  const candidates = source.columns.filter((column) => isNumericMeasure(column, source));
+  const usefulTerms = ["valeur", "nombre", "total", "population", "voiture", "consommation", "montant", "effectif", "mesure"];
+  return candidates.find((column) => usefulTerms.some((term) => column.name.toLocaleLowerCase("fr-FR").includes(term)))?.name
+    ?? candidates.find((column) => !/(^|[ _.-])(id|code)([ _.-]|$)/i.test(column.name))?.name
+    ?? candidates[0]?.name
+    ?? "";
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 3 }).format(value);
+}
+
+function formatIndicator(value: number, unit: string) {
+  return `${formatNumber(value)}${unit === "%" ? " %" : ""}`;
+}
+
+function truncateLabel(value: string, length: number) {
+  return value.length > length ? `${value.slice(0, length - 1)}…` : value;
 }
 
 function translateType(value: string) {

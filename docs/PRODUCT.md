@@ -30,7 +30,9 @@ L’utilisateur décrit les données qu’il recherche sans connaître les catal
 - conserve une première source dans un projet puis permet d’y ajouter une deuxième source ;
 - suggère, sans l’imposer, les colonnes « commune » et « année » à partir de leur nom et d’exemples ;
 - mesure le croisement confirmé : clés appariées, taux par source, doublons et exemples non appariés ;
-- refuse d’inventer une année absente et explique quand la comparaison se limite à la commune.
+- refuse d’inventer une année absente et explique quand la comparaison se limite à la commune ;
+- agrège une valeur choisie dans chaque source par commune et année, puis applique un rapport ou une différence ;
+- affiche la formule, les exclusions, les valeurs intermédiaires et un graphique déterministe.
 
 ## Hors périmètre
 
