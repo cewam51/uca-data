@@ -1,0 +1,55 @@
+from hashlib import sha256
+from pathlib import Path
+from typing import BinaryIO
+from uuid import uuid4
+
+from .analyzer import analyze_csv
+from .repository import DatasetRepository
+
+
+class UploadTooLargeError(ValueError):
+    pass
+
+
+class CsvUploadService:
+    def __init__(self, upload_dir: Path, max_upload_bytes: int, repository: DatasetRepository):
+        self.upload_dir = upload_dir
+        self.max_upload_bytes = max_upload_bytes
+        self.repository = repository
+
+    def import_csv(self, original_name: str, stream: BinaryIO) -> dict:
+        if not original_name.lower().endswith(".csv"):
+            raise ValueError("Seuls les fichiers CSV sont acceptés.")
+
+        dataset_id = str(uuid4())
+        stored_name = f"{dataset_id}.csv"
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        destination = self.upload_dir / stored_name
+        digest = sha256()
+        size_bytes = 0
+
+        try:
+            with destination.open("xb") as target:
+                while chunk := stream.read(1024 * 1024):
+                    size_bytes += len(chunk)
+                    if size_bytes > self.max_upload_bytes:
+                        raise UploadTooLargeError(
+                            f"Le fichier dépasse la limite de {self.max_upload_bytes} octets."
+                        )
+                    digest.update(chunk)
+                    target.write(chunk)
+
+            analysis = analyze_csv(destination)
+            result = {
+                "id": dataset_id,
+                "original_name": Path(original_name).name,
+                "stored_name": stored_name,
+                "sha256": digest.hexdigest(),
+                "size_bytes": size_bytes,
+                **analysis,
+            }
+            self.repository.save(result)
+            return result
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise

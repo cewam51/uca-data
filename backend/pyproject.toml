@@ -1,0 +1,22 @@
+[project]
+name = "uca-data-backend"
+version = "0.1.0"
+description = "API d'import et d'analyse de données publiques pour UCA Data"
+requires-python = ">=3.12"
+dependencies = [
+  "duckdb==1.4.0",
+  "fastapi==0.116.1",
+  "psycopg[binary]==3.2.10",
+  "python-multipart==0.0.20",
+  "uvicorn[standard]==0.35.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx==0.28.1",
+  "pytest==8.4.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
