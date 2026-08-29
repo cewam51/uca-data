@@ -32,7 +32,8 @@ L’utilisateur décrit les données qu’il recherche sans connaître les catal
 - mesure le croisement confirmé : clés appariées, taux par source, doublons et exemples non appariés ;
 - refuse d’inventer une année absente et explique quand la comparaison se limite à la commune ;
 - agrège une valeur choisie dans chaque source par commune et année, puis applique un rapport ou une différence ;
-- affiche la formule, les exclusions, les valeurs intermédiaires et un graphique déterministe.
+- affiche la formule, les exclusions, les valeurs intermédiaires et un graphique déterministe ;
+- publie une fiche sourcée avec une empreinte propre, un historique immuable et des commentaires collaboratifs.
 
 ## Hors périmètre
 
@@ -41,4 +42,4 @@ L’utilisateur décrit les données qu’il recherche sans connaître les catal
 - génération de données par IA ;
 - transformations ou rapprochements non expliqués à l’utilisateur.
 
-Les jointures, indicateurs, graphiques et fiches collaboratives font partie de l’objectif produit et seront ajoutés progressivement après validation du socle de recherche et d’import.
+Les versions publiées sont immuables. Une correction ou une nouvelle interprétation crée une version supplémentaire ; les commentaires restent attachés à la version qu’ils discutent.

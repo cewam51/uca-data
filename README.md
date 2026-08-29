@@ -31,7 +31,7 @@ Avec deux sources, le site suggère les colonnes susceptibles de représenter la
 
 Lorsque le croisement contient des correspondances, l’utilisateur choisit une valeur numérique et une agrégation pour chaque source, puis une formule : rapport en pourcentage ou différence. Le calcul est effectué sur les clés appariées seulement. La formule exacte, les exclusions, les valeurs agrégées et le résultat restent visibles avec un graphique en barres et un tableau de contrôle. Les choix et le résultat sont conservés dans le projet avec les empreintes des deux sources.
 
-Étape suivante : publication de fiches collaboratives sourcées et versionnées.
+Une fiche peut ensuite être publiée depuis le projet. Chaque version est un instantané immuable contenant le texte, le graphique, les résultats, les statistiques de qualité, la recette de calcul, la provenance et les empreintes SHA-256 des sources. La fiche possède sa propre empreinte, conserve toutes les versions précédentes et accepte des contributions sous forme de commentaires sans modifier silencieusement le contenu publié.
 
 Stack : Next.js/TypeScript, FastAPI/Python, DuckDB et PostgreSQL.
 

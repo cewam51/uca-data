@@ -5,6 +5,8 @@ from uuid import UUID, uuid4
 import psycopg
 from psycopg.types.json import Jsonb
 
+from .publication import build_publication_snapshot, snapshot_sha256
+
 
 class DatasetRepository(Protocol):
     def save(self, dataset: dict[str, Any]) -> None: ...
@@ -82,6 +84,30 @@ class PostgresDatasetRepository:
             )
             connection.execute(
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS indicator_json JSONB"
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_versions (
+                    id UUID PRIMARY KEY,
+                    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    version_number INTEGER NOT NULL CHECK (version_number > 0),
+                    snapshot_json JSONB NOT NULL,
+                    snapshot_sha256 CHAR(64) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    UNIQUE (project_id, version_number)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS version_comments (
+                    id UUID PRIMARY KEY,
+                    version_id UUID NOT NULL REFERENCES project_versions(id) ON DELETE CASCADE,
+                    author_name TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL
+                )
+                """
             )
 
     def save(self, dataset: dict[str, Any]) -> None:
@@ -198,8 +224,10 @@ class PostgresDatasetRepository:
         with psycopg.connect(self.database_url) as connection:
             project = connection.execute(
                 """
-                SELECT id, title, created_at, join_analysis_json, indicator_json
-                FROM projects WHERE id = %s
+                SELECT p.id, p.title, p.created_at, p.join_analysis_json,
+                       p.indicator_json,
+                       (SELECT count(*) FROM project_versions pv WHERE pv.project_id = p.id)
+                FROM projects p WHERE p.id = %s
                 """,
                 (project_id,),
             ).fetchone()
@@ -245,6 +273,7 @@ class PostgresDatasetRepository:
             "sources": sources,
             "join_analysis": project[3],
             "indicator": project[4],
+            "version_count": project[5],
         }
 
     def get_project_source_files(self, project_id: UUID) -> list[dict[str, Any]]:
@@ -335,3 +364,154 @@ class PostgresDatasetRepository:
             )
             if result.rowcount == 0:
                 raise LookupError("Projet introuvable.")
+
+    def create_version(
+        self,
+        project_id: UUID,
+        project: dict[str, Any],
+        author_name: str,
+        title: str,
+        summary: str,
+        interpretation: str,
+        limitations: str,
+    ) -> dict[str, Any]:
+        version_id = uuid4()
+        created_at = datetime.now(timezone.utc)
+        with psycopg.connect(self.database_url) as connection:
+            if connection.execute(
+                "SELECT id FROM projects WHERE id = %s FOR UPDATE",
+                (project_id,),
+            ).fetchone() is None:
+                raise LookupError("Projet introuvable.")
+            version_number = connection.execute(
+                """
+                SELECT coalesce(max(version_number), 0) + 1
+                FROM project_versions WHERE project_id = %s
+                """,
+                (project_id,),
+            ).fetchone()[0]
+            snapshot = build_publication_snapshot(
+                project,
+                version_number,
+                created_at.isoformat(),
+                author_name,
+                title,
+                summary,
+                interpretation,
+                limitations,
+            )
+            digest = snapshot_sha256(snapshot)
+            connection.execute(
+                """
+                INSERT INTO project_versions (
+                    id, project_id, version_number, snapshot_json,
+                    snapshot_sha256, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    version_id,
+                    project_id,
+                    version_number,
+                    Jsonb(snapshot),
+                    digest,
+                    created_at,
+                ),
+            )
+        return self.get_publication(version_id)
+
+    def list_versions(self, project_id: UUID) -> list[dict[str, Any]]:
+        with psycopg.connect(self.database_url) as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM projects WHERE id = %s", (project_id,)
+            ).fetchone()
+            if exists is None:
+                raise LookupError("Projet introuvable.")
+            rows = connection.execute(
+                """
+                SELECT id, version_number, snapshot_json->>'title',
+                       snapshot_json->>'author_name', snapshot_sha256, created_at
+                FROM project_versions
+                WHERE project_id = %s
+                ORDER BY version_number DESC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [
+            {
+                "id": str(row[0]),
+                "version_number": row[1],
+                "title": row[2],
+                "author_name": row[3],
+                "snapshot_sha256": row[4],
+                "created_at": row[5].isoformat(),
+            }
+            for row in rows
+        ]
+
+    def get_publication(self, version_id: UUID) -> dict[str, Any]:
+        with psycopg.connect(self.database_url) as connection:
+            version = connection.execute(
+                """
+                SELECT id, project_id, version_number, snapshot_json,
+                       snapshot_sha256, created_at
+                FROM project_versions WHERE id = %s
+                """,
+                (version_id,),
+            ).fetchone()
+            if version is None:
+                raise LookupError("Version publiée introuvable.")
+            comments = connection.execute(
+                """
+                SELECT id, author_name, content, created_at
+                FROM version_comments
+                WHERE version_id = %s
+                ORDER BY created_at, id
+                """,
+                (version_id,),
+            ).fetchall()
+        versions = self.list_versions(version[1])
+        return {
+            **version[3],
+            "id": str(version[0]),
+            "project_id": str(version[1]),
+            "version_number": version[2],
+            "snapshot_sha256": version[4],
+            "created_at": version[5].isoformat(),
+            "comments": [
+                {
+                    "id": str(comment[0]),
+                    "author_name": comment[1],
+                    "content": comment[2],
+                    "created_at": comment[3].isoformat(),
+                }
+                for comment in comments
+            ],
+            "versions": versions,
+        }
+
+    def add_comment(
+        self,
+        version_id: UUID,
+        author_name: str,
+        content: str,
+    ) -> dict[str, Any]:
+        comment_id = uuid4()
+        created_at = datetime.now(timezone.utc)
+        with psycopg.connect(self.database_url) as connection:
+            if connection.execute(
+                "SELECT 1 FROM project_versions WHERE id = %s", (version_id,)
+            ).fetchone() is None:
+                raise LookupError("Version publiée introuvable.")
+            connection.execute(
+                """
+                INSERT INTO version_comments (id, version_id, author_name, content, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (comment_id, version_id, author_name, content, created_at),
+            )
+        return {
+            "id": str(comment_id),
+            "author_name": author_name,
+            "content": content,
+            "created_at": created_at.isoformat(),
+        }

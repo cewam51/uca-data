@@ -16,6 +16,7 @@ from .catalog_importer import (
 )
 from .catalogs import search_catalogs
 from .config import settings
+from .publication_service import PublicationService
 from .repository import PostgresDatasetRepository
 from .project_service import ProjectAnalysisService
 from .service import CsvUploadService, UploadTooLargeError
@@ -23,6 +24,7 @@ from .service import CsvUploadService, UploadTooLargeError
 
 repository = PostgresDatasetRepository(settings.database_url)
 project_analysis = ProjectAnalysisService(settings.upload_dir, repository)
+publication_service = PublicationService(repository)
 
 
 class ProjectCreate(BaseModel):
@@ -58,6 +60,19 @@ class IndicatorCreate(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     operation: Literal["ratio_percent", "difference"]
     sources: list[IndicatorSource] = Field(min_length=2, max_length=2)
+
+
+class PublicationCreate(BaseModel):
+    author_name: str = Field(min_length=2, max_length=80)
+    title: str = Field(min_length=2, max_length=160)
+    summary: str = Field(min_length=2, max_length=3000)
+    interpretation: str = Field(default="", max_length=5000)
+    limitations: str = Field(min_length=2, max_length=5000)
+
+
+class CommentCreate(BaseModel):
+    author_name: str = Field(min_length=2, max_length=80)
+    content: str = Field(min_length=2, max_length=2000)
 
 
 @asynccontextmanager
@@ -186,6 +201,53 @@ def create_project_indicator(project_id: UUID, payload: IndicatorCreate) -> dict
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/versions")
+def list_project_versions(project_id: UUID) -> list[dict]:
+    try:
+        return repository.list_versions(project_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/versions", status_code=201)
+def publish_project_version(project_id: UUID, payload: PublicationCreate) -> dict:
+    values = {
+        "author_name": payload.author_name.strip(),
+        "title": payload.title.strip(),
+        "summary": payload.summary.strip(),
+        "interpretation": payload.interpretation.strip(),
+        "limitations": payload.limitations.strip(),
+    }
+    if any(len(values[key]) < 2 for key in ("author_name", "title", "summary", "limitations")):
+        raise HTTPException(status_code=422, detail="Les champs de publication requis sont trop courts.")
+    try:
+        return publication_service.publish(project_id, **values)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/publications/{version_id}")
+def get_publication(version_id: UUID) -> dict:
+    try:
+        return repository.get_publication(version_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/api/publications/{version_id}/comments", status_code=201)
+def add_publication_comment(version_id: UUID, payload: CommentCreate) -> dict:
+    author_name = payload.author_name.strip()
+    content = payload.content.strip()
+    if len(author_name) < 2 or len(content) < 2:
+        raise HTTPException(status_code=422, detail="Le nom et le commentaire sont trop courts.")
+    try:
+        return repository.add_comment(version_id, author_name, content)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.get("/api/search")

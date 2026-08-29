@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type SearchResult = {
   id: string;
@@ -47,6 +48,9 @@ type ProjectSource = Omit<Dataset, "preview" | "catalog_source"> & {
   catalog_source?: string;
   title: string;
   publisher?: string | null;
+  source_url?: string | null;
+  catalog_dataset_id?: string | null;
+  catalog_resource_id?: string | null;
   dimensions?: { commune: string | null; année: string | null };
 };
 
@@ -103,6 +107,65 @@ type Project = {
   sources: ProjectSource[];
   join_analysis?: JoinAnalysis | null;
   indicator?: IndicatorResult | null;
+  version_count?: number;
+};
+
+type VersionSummary = {
+  id: string;
+  version_number: number;
+  title: string;
+  author_name: string;
+  snapshot_sha256: string;
+  created_at: string;
+};
+
+type PublicationComment = {
+  id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+};
+
+type PublishedSource = {
+  position: number;
+  dataset_id: string;
+  title: string;
+  publisher?: string | null;
+  catalog_source?: string | null;
+  catalog_dataset_id?: string | null;
+  catalog_resource_id?: string | null;
+  source_url?: string | null;
+  sha256: string;
+  size_bytes: number;
+  row_count: number;
+  columns: Column[];
+  dimensions: { commune: string | null; année: string | null };
+};
+
+type PublishedVersion = {
+  id: string;
+  project_id: string;
+  project_title: string;
+  version_number: number;
+  title: string;
+  author_name: string;
+  summary: string;
+  interpretation: string;
+  limitations: string;
+  published_at: string;
+  created_at: string;
+  snapshot_sha256: string;
+  sources: PublishedSource[];
+  join_analysis: JoinAnalysis;
+  indicator: IndicatorResult;
+  reproducibility: {
+    engine: string;
+    key_normalization: string;
+    missing_data_policy: string;
+    source_hashes: string[];
+  };
+  comments: PublicationComment[];
+  versions: VersionSummary[];
 };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -113,22 +176,31 @@ export default function Home() {
   const [search, setSearch] = useState<SearchResponse | null>(null);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [project, setProject] = useState<Project | null>(null);
+  const [publication, setPublication] = useState<PublishedVersion | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [exploring, setExploring] = useState("");
 
   useEffect(() => {
-    const projectId = new URLSearchParams(window.location.search).get("project");
-    if (!projectId) return;
+    const parameters = new URLSearchParams(window.location.search);
+    const publicationId = parameters.get("publication");
+    const projectId = parameters.get("project");
+    if (!publicationId && !projectId) return;
     let active = true;
-    fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}`)
+    const endpoint = publicationId
+      ? `${apiUrl}/api/publications/${encodeURIComponent(publicationId)}`
+      : `${apiUrl}/api/projects/${encodeURIComponent(projectId!)}`;
+    fetch(endpoint)
       .then(async (response) => {
         const body = await response.json();
-        if (!response.ok) throw new Error(body.detail ?? "Le projet n’a pas pu être retrouvé.");
-        if (active) setProject(body);
+        if (!response.ok) throw new Error(body.detail ?? "La fiche n’a pas pu être retrouvée.");
+        if (active) {
+          if (publicationId) setPublication(body);
+          else setProject(body);
+        }
       })
       .catch((reason) => {
-        if (active) setError(reason instanceof Error ? reason.message : "Le projet n’a pas pu être retrouvé.");
+        if (active) setError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être retrouvée.");
       });
     return () => { active = false; };
   }, []);
@@ -209,6 +281,8 @@ export default function Home() {
       setExploring("");
     }
   }
+
+  if (publication) return <PublishedSheet publication={publication} />;
 
   if (dataset) {
     return (
@@ -344,6 +418,7 @@ function Journey({ project }: { project: Project | null }) {
       <span className={project ? "active" : ""}><b>2</b>Ajouter une deuxième source</span>
       <span className={project?.sources.length === 2 ? "active" : ""}><b>3</b>Vérifier le croisement</span>
       <span className={project?.indicator ? "active" : ""}><b>4</b>Créer un indicateur</span>
+      <span className={(project?.version_count ?? 0) > 0 ? "active" : ""}><b>5</b>Publier une fiche</span>
     </div>
   );
 }
@@ -846,7 +921,12 @@ function IndicatorBuilder({
       <button onClick={calculate} disabled={calculating || missingMeasure || title.trim().length < 2}>
         {calculating ? "Calcul de l’indicateur…" : "Calculer et afficher"}
       </button>
-      {result && <IndicatorView indicator={result} />}
+      {result && (
+        <>
+          <IndicatorView indicator={result} />
+          <PublicationBuilder project={{ ...project, indicator: result }} />
+        </>
+      )}
     </section>
   );
 }
@@ -944,6 +1024,281 @@ function IndicatorChart({ indicator }: { indicator: IndicatorResult }) {
   );
 }
 
+function PublicationBuilder({ project }: { project: Project }) {
+  const router = useRouter();
+  const indicator = project.indicator!;
+  const join = project.join_analysis!;
+  const [authorName, setAuthorName] = useState("");
+  const [title, setTitle] = useState(indicator.title);
+  const [summary, setSummary] = useState(
+    `${indicator.title} a été calculé pour ${indicator.result_count.toLocaleString("fr-FR")} combinaison(s) ${indicator.dimensions.join(" + ")}.`,
+  );
+  const [interpretation, setInterpretation] = useState("");
+  const [limitations, setLimitations] = useState(() => {
+    const alerts = [...join.warnings, ...indicator.warnings];
+    const coverage = `Les résultats portent uniquement sur les clés appariées : ${join.left_match_rate.toLocaleString("fr-FR")} % de la source 1 et ${join.right_match_rate.toLocaleString("fr-FR")} % de la source 2.`;
+    return [coverage, ...alerts].join(" ");
+  });
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${apiUrl}/api/projects/${encodeURIComponent(project.id)}/versions`)
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail ?? "L’historique n’a pas pu être chargé.");
+        if (active) setVersions(body);
+      })
+      .catch((reason) => {
+        if (active) setError(reason instanceof Error ? reason.message : "L’historique n’a pas pu être chargé.");
+      });
+    return () => { active = false; };
+  }, [project.id]);
+
+  async function publish(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPublishing(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(project.id)}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          author_name: authorName,
+          title,
+          summary,
+          interpretation,
+          limitations,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "La fiche n’a pas pu être publiée.");
+      router.push(`/?publication=${encodeURIComponent(body.id)}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être publiée.");
+      setPublishing(false);
+    }
+  }
+
+  const canPublish = [authorName, title, summary, limitations].every((value) => value.trim().length >= 2);
+  return (
+    <section className="publication-builder" aria-labelledby="publication-builder-title">
+      <div className="publication-builder-heading">
+        <div>
+          <p className="eyebrow">Étape 5</p>
+          <h3 id="publication-builder-title">Publier une fiche citoyenne</h3>
+        </div>
+        <p>La publication fige les données, la méthode et le texte. Une correction créera une nouvelle version.</p>
+      </div>
+      <form onSubmit={publish}>
+        <div className="publication-short-fields">
+          <label>
+            Nom ou pseudonyme
+            <input value={authorName} maxLength={80} onChange={(event) => setAuthorName(event.target.value)} placeholder="Ex. Camille" />
+          </label>
+          <label>
+            Titre de la fiche
+            <input value={title} maxLength={160} onChange={(event) => setTitle(event.target.value)} />
+          </label>
+        </div>
+        <label>
+          Résumé factuel
+          <textarea value={summary} maxLength={3000} rows={3} onChange={(event) => setSummary(event.target.value)} />
+        </label>
+        <label>
+          Interprétation proposée <span>facultatif</span>
+          <textarea
+            value={interpretation}
+            maxLength={5000}
+            rows={4}
+            onChange={(event) => setInterpretation(event.target.value)}
+            placeholder="Distinguez ici votre lecture des faits calculés."
+          />
+        </label>
+        <label>
+          Précautions et limites
+          <textarea value={limitations} maxLength={5000} rows={4} onChange={(event) => setLimitations(event.target.value)} />
+        </label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button disabled={!canPublish || publishing}>{publishing ? "Publication…" : "Publier cette version"}</button>
+      </form>
+      {versions.length > 0 && (
+        <div className="version-history compact-history">
+          <strong>Versions déjà publiées</strong>
+          {versions.map((version) => (
+            <a href={`?publication=${encodeURIComponent(version.id)}`} key={version.id}>
+              Version {version.version_number} · {version.title} · {formatDate(version.created_at)}
+            </a>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PublishedSheet({ publication }: { publication: PublishedVersion }) {
+  return (
+    <main className="published-page">
+      <nav className="publication-nav" aria-label="Navigation de la fiche">
+        <a href={`?project=${encodeURIComponent(publication.project_id)}`}>← Proposer une nouvelle version</a>
+        <span>Version {publication.version_number} · immuable</span>
+      </nav>
+      <article className="published-sheet">
+        <header className="published-header">
+          <p className="eyebrow">Fiche citoyenne publiée</p>
+          <h1>{publication.title}</h1>
+          <p className="published-meta">
+            Version {publication.version_number}, publiée par {publication.author_name} le {formatDate(publication.published_at)}
+          </p>
+          <p className="published-summary">{publication.summary}</p>
+        </header>
+
+        {publication.interpretation && (
+          <section className="narrative-section">
+            <p className="eyebrow">Interprétation proposée</p>
+            <p>{publication.interpretation}</p>
+          </section>
+        )}
+
+        <IndicatorView indicator={publication.indicator} />
+
+        <section className="published-quality" aria-labelledby="published-quality-title">
+          <p className="eyebrow">Qualité du croisement</p>
+          <h2 id="published-quality-title">Ce qui correspond — et ce qui ne correspond pas</h2>
+          <div className="match-metrics">
+            <div><span>Clés appariées</span><strong>{publication.join_analysis.matched_keys.toLocaleString("fr-FR")}</strong></div>
+            <div><span>Source 1 retrouvée</span><strong>{publication.join_analysis.left_match_rate.toLocaleString("fr-FR")} %</strong></div>
+            <div><span>Source 2 retrouvée</span><strong>{publication.join_analysis.right_match_rate.toLocaleString("fr-FR")} %</strong></div>
+          </div>
+          {publication.join_analysis.warnings.length > 0 && (
+            <div className="warnings">{publication.join_analysis.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>
+          )}
+        </section>
+
+        <section className="published-sources" aria-labelledby="published-sources-title">
+          <p className="eyebrow">Sources figées</p>
+          <h2 id="published-sources-title">D’où viennent les données ?</h2>
+          <div className="published-source-grid">
+            {publication.sources.map((source) => (
+              <article key={source.dataset_id}>
+                <span>Source {source.position}</span>
+                <h3>{source.title}</h3>
+                <p>{source.publisher || source.catalog_source || "Producteur public"}</p>
+                <dl>
+                  <div><dt>Plateforme</dt><dd>{source.catalog_source || "Non précisée"}</dd></div>
+                  <div><dt>Lignes</dt><dd>{source.row_count.toLocaleString("fr-FR")}</dd></div>
+                  <div><dt>Commune</dt><dd>{source.dimensions.commune || "—"}</dd></div>
+                  <div><dt>Année</dt><dd>{source.dimensions.année || "—"}</dd></div>
+                </dl>
+                {source.source_url && <a href={source.source_url} target="_blank" rel="noreferrer">Ouvrir la ressource d’origine ↗</a>}
+                <code title="Empreinte SHA-256">SHA-256 · {source.sha256}</code>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="narrative-section limitations-section">
+          <p className="eyebrow">Précautions d’interprétation</p>
+          <p>{publication.limitations}</p>
+        </section>
+
+        <section className="reproducibility" aria-labelledby="reproducibility-title">
+          <p className="eyebrow">Reproductibilité</p>
+          <h2 id="reproducibility-title">Comment ce résultat a été obtenu</h2>
+          <ol>
+            <li>Les deux ressources ci-dessus ont été vérifiées avec leur empreinte SHA-256.</li>
+            <li>{publication.reproducibility.key_normalization}</li>
+            <li>La jointure utilise {publication.indicator.dimensions.join(" + ")} et conserve uniquement les clés appariées.</li>
+            <li>La formule appliquée est : <code>{publication.indicator.formula}</code></li>
+            <li>{publication.reproducibility.missing_data_policy}</li>
+          </ol>
+          <div className="snapshot-fingerprint">
+            <span>Empreinte de cette version</span>
+            <code>{publication.snapshot_sha256}</code>
+          </div>
+        </section>
+
+        <VersionHistory versions={publication.versions} currentId={publication.id} />
+        <PublicationComments publication={publication} />
+      </article>
+    </main>
+  );
+}
+
+function VersionHistory({ versions, currentId }: { versions: VersionSummary[]; currentId: string }) {
+  return (
+    <section className="version-history" aria-labelledby="version-history-title">
+      <p className="eyebrow">Historique</p>
+      <h2 id="version-history-title">Versions publiées</h2>
+      <div>
+        {versions.map((version) => (
+          <a className={version.id === currentId ? "current" : ""} href={`?publication=${encodeURIComponent(version.id)}`} key={version.id}>
+            <strong>Version {version.version_number} · {version.title}</strong>
+            <span>{version.author_name} · {formatDate(version.created_at)}</span>
+            <code>{version.snapshot_sha256.slice(0, 16)}…</code>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PublicationComments({ publication }: { publication: PublishedVersion }) {
+  const [comments, setComments] = useState(publication.comments);
+  const [authorName, setAuthorName] = useState("");
+  const [content, setContent] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSending(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/publications/${encodeURIComponent(publication.id)}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ author_name: authorName, content }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Le commentaire n’a pas pu être ajouté.");
+      setComments((current) => [...current, body]);
+      setContent("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Le commentaire n’a pas pu être ajouté.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <section className="publication-comments" aria-labelledby="comments-title">
+      <p className="eyebrow">Discussion</p>
+      <h2 id="comments-title">Contributions sur cette version</h2>
+      {comments.length ? (
+        <div className="comment-list">
+          {comments.map((comment) => (
+            <article key={comment.id}>
+              <header><strong>{comment.author_name}</strong><time>{formatDateTime(comment.created_at)}</time></header>
+              <p>{comment.content}</p>
+            </article>
+          ))}
+        </div>
+      ) : <p className="no-comments">Aucune contribution pour le moment.</p>}
+      <form onSubmit={submit}>
+        <label>Nom ou pseudonyme<input value={authorName} maxLength={80} onChange={(event) => setAuthorName(event.target.value)} /></label>
+        <label>Commentaire<textarea value={content} maxLength={2000} rows={4} onChange={(event) => setContent(event.target.value)} /></label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button disabled={sending || authorName.trim().length < 2 || content.trim().length < 2}>
+          {sending ? "Ajout…" : "Ajouter la contribution"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
 function isNumericMeasure(column: Column, source: ProjectSource) {
   if (column.name === source.dimensions?.commune || column.name === source.dimensions?.année) return false;
   return /^(U?TINYINT|U?SMALLINT|U?INTEGER|U?BIGINT|HUGEINT|FLOAT|DOUBLE|DECIMAL|REAL)/.test(column.type);
@@ -988,6 +1343,13 @@ function bestSuggestedColumn(columns: Column[], role: string) {
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value.slice(0, 10) : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(date);
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function formatSize(value: number) {
