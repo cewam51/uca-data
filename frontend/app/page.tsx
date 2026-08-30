@@ -130,6 +130,16 @@ type ChartResult = {
   source: { dataset_id: string; title: string; sha256: string };
 };
 
+type ChartPreview = {
+  dataset_id: string;
+  category_column: string;
+  value_column: string;
+  aggregation: string;
+  sampled_rows: number;
+  grouped_rows: { label: string; value: number }[];
+  scatter_rows: { x: number; y: number }[];
+};
+
 type Project = {
   id: string;
   title: string;
@@ -139,6 +149,17 @@ type Project = {
   indicator?: IndicatorResult | null;
   chart?: ChartResult | null;
   version_count?: number;
+};
+
+type ProjectSummary = {
+  id: string;
+  title: string;
+  created_at: string;
+  source_count: number;
+  version_count: number;
+  has_chart: boolean;
+  status: "in_progress" | "completed";
+  sources: { title: string; catalog_source?: string | null }[];
 };
 
 type VersionSummary = {
@@ -203,6 +224,14 @@ type PublishedVersion = {
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const examples = ["population par commune", "parc automobile", "consommation électrique"];
 
+function isSourceUrl(value: string) {
+  try {
+    return ["http:", "https:"].includes(new URL(value.trim()).protocol);
+  } catch {
+    return false;
+  }
+}
+
 export default function Home() {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -215,6 +244,9 @@ export default function Home() {
   const [exploring, setExploring] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [showProjects, setShowProjects] = useState(false);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -254,6 +286,23 @@ export default function Home() {
     setError("");
     setDataset(null);
     try {
+      if (isSourceUrl(normalized)) {
+        setSearch(null);
+        const response = await fetch(`${apiUrl}/api/sources/explore`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: normalized }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail ?? "Cette source n’a pas pu être ouverte.");
+        await attachImportedDataset(
+          body,
+          body.original_name,
+          body.catalog_source || new URL(normalized).hostname,
+          body.original_name,
+        );
+        return;
+      }
       const response = await fetch(`${apiUrl}/api/search?q=${encodeURIComponent(normalized)}`);
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail ?? "La recherche a échoué.");
@@ -263,6 +312,42 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function attachImportedDataset(
+    imported: Dataset,
+    sourceTitle: string,
+    sourcePublisher: string | null,
+    projectTitle: string,
+  ) {
+    const projectResponse = await fetch(
+      project ? `${apiUrl}/api/projects/${encodeURIComponent(project.id)}/sources` : `${apiUrl}/api/projects`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          project
+            ? {
+                dataset_id: imported.id,
+                source_title: sourceTitle,
+                source_publisher: sourcePublisher,
+              }
+            : {
+                dataset_id: imported.id,
+                title: `Projet : ${projectTitle}`.slice(0, 160),
+                source_title: sourceTitle,
+                source_publisher: sourcePublisher,
+              },
+        ),
+      },
+    );
+    const projectBody = await projectResponse.json();
+    if (!projectResponse.ok) throw new Error(projectBody.detail ?? "La source n’a pas pu être ajoutée au projet.");
+    setProject(projectBody);
+    setShowSearch(false);
+    window.history.replaceState({}, "", `${window.location.pathname}?project=${encodeURIComponent(projectBody.id)}`);
+    setDataset(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function explore(result: SearchResult) {
@@ -286,34 +371,7 @@ export default function Home() {
       const response = await fetch(endpoint, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail ?? "Cette ressource ne peut pas être explorée.");
-      const projectResponse = await fetch(
-        project ? `${apiUrl}/api/projects/${encodeURIComponent(project.id)}/sources` : `${apiUrl}/api/projects`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            project
-              ? {
-                  dataset_id: body.id,
-                  source_title: result.title,
-                  source_publisher: result.publisher,
-                }
-              : {
-                  dataset_id: body.id,
-                  title: `Projet : ${query || result.title}`.slice(0, 160),
-                  source_title: result.title,
-                  source_publisher: result.publisher,
-                },
-          ),
-        },
-      );
-      const projectBody = await projectResponse.json();
-      if (!projectResponse.ok) throw new Error(projectBody.detail ?? "La source n’a pas pu être ajoutée au projet.");
-      setProject(projectBody);
-      setShowSearch(false);
-      window.history.replaceState({}, "", `${window.location.pathname}?project=${encodeURIComponent(projectBody.id)}`);
-      setDataset(null);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      await attachImportedDataset(body, result.title, result.publisher, query || result.title);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cette ressource ne peut pas être explorée.");
     } finally {
@@ -321,56 +379,129 @@ export default function Home() {
     }
   }
 
-  if (publication) return <PublishedSheet publication={publication} />;
+  function goHome() {
+    setProject(null);
+    setPublication(null);
+    setDataset(null);
+    setSearch(null);
+    setQuery("");
+    setError("");
+    setShowSearch(false);
+    setShowProjects(false);
+    router.replace("/");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function openProjects() {
+    setShowProjects(true);
+    setProjectsLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/projects`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Les projets n’ont pas pu être retrouvés.");
+      setProjects(body);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Les projets n’ont pas pu être retrouvés.");
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  async function openProject(projectId: string) {
+    setProjectsLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Le projet n’a pas pu être ouvert.");
+      setProject(body);
+      setPublication(null);
+      setDataset(null);
+      setShowSearch(false);
+      setShowProjects(false);
+      window.history.replaceState({}, "", `${window.location.pathname}?project=${encodeURIComponent(projectId)}`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Le projet n’a pas pu être ouvert.");
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  const navigation = (
+    <AppNavigation
+      current={showProjects ? "projects" : project || publication ? "workspace" : "home"}
+      onHome={goHome}
+      onProjects={openProjects}
+    />
+  );
+
+  if (showProjects) {
+    return (
+      <>
+        {navigation}
+        <ProjectsPage
+          projects={projects}
+          loading={projectsLoading}
+          error={error}
+          onOpen={openProject}
+        />
+      </>
+    );
+  }
+
+  if (publication) return <>{navigation}<PublishedSheet publication={publication} /></>;
 
   if (project && !showSearch) {
     return (
-      <FlexibleWorkspace
-        project={project}
-        onProjectChange={setProject}
-        onNewProject={() => {
-          setProject(null);
-          setDataset(null);
-          setSearch(null);
-          setQuery("");
-          setError("");
-          setShowSearch(false);
-          router.replace("/");
-        }}
-        onAddSource={() => {
-          setShowSearch(true);
-          setSearch(null);
-          setQuery("");
-          setError("");
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }}
-      />
+      <>
+        {navigation}
+        <FlexibleWorkspace
+          project={project}
+          onProjectChange={setProject}
+          onNewProject={goHome}
+          onAddSource={() => {
+            setShowSearch(true);
+            setSearch(null);
+            setQuery("");
+            setError("");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
+      </>
     );
   }
 
   if (dataset) {
     return (
-      <main>
-        {(!project || project.sources.length < 2) && (
-          <button className="back" onClick={() => setDataset(null)}>← Revenir aux résultats</button>
-        )}
-        <DatasetResult
-          dataset={dataset}
-          project={project}
-          onProjectChange={setProject}
-          onAddSecond={() => {
-            setDataset(null);
-            setSearch(null);
-            setQuery("");
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-        />
-      </main>
+      <>
+        {navigation}
+        <main>
+          {(!project || project.sources.length < 2) && (
+            <button className="back" onClick={() => setDataset(null)}>← Revenir aux résultats</button>
+          )}
+          <DatasetResult
+            dataset={dataset}
+            project={project}
+            onProjectChange={setProject}
+            onAddSecond={() => {
+              setDataset(null);
+              setSearch(null);
+              setQuery("");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
+        </main>
+      </>
     );
   }
 
   return (
-    <main>
+    <>
+      {navigation}
+      <main>
       <header>
         <p className="eyebrow">Explorateur de données publiques</p>
         <h1>{project ? "Ajouter un document, si vous en avez besoin." : "Trouver les faits derrière une question."}</h1>
@@ -392,11 +523,14 @@ export default function Home() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Ex. nombre de voitures par commune"
+              placeholder="Des mots-clés ou le lien d’une source de données"
               autoComplete="off"
             />
-            <button disabled={query.trim().length < 2 || loading}>{loading ? "Recherche…" : "Rechercher"}</button>
+            <button disabled={query.trim().length < 2 || loading}>
+              {loading ? "Ouverture…" : isSourceUrl(query) ? "Ouvrir la source" : "Rechercher"}
+            </button>
           </div>
+          <p className="search-hint">Vous pouvez aussi coller directement une fiche data.gouv.fr, data.europa.eu, Recherche Data Gouv ou Insee, ou un lien public CSV/TSV.</p>
         </form>
         <div className="examples">
           <span>Exemples</span>
@@ -415,7 +549,109 @@ export default function Home() {
           onSourceFilterChange={setSourceFilter}
         />
       )}
+      </main>
+    </>
+  );
+}
+
+function AppNavigation({
+  current,
+  onHome,
+  onProjects,
+}: {
+  current: "home" | "projects" | "workspace";
+  onHome: () => void;
+  onProjects: () => void;
+}) {
+  return (
+    <nav className="app-navigation" aria-label="Navigation principale">
+      <div className="app-navigation-inner">
+        <button className="app-brand" onClick={onHome}>Données citoyennes</button>
+        <div>
+          <button className={current === "home" ? "active" : ""} onClick={onHome}>Accueil</button>
+          <button className={current === "projects" ? "active" : ""} onClick={onProjects}>Mes projets</button>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+function ProjectsPage({
+  projects,
+  loading,
+  error,
+  onOpen,
+}: {
+  projects: ProjectSummary[];
+  loading: boolean;
+  error: string;
+  onOpen: (projectId: string) => void;
+}) {
+  const inProgress = projects.filter((project) => project.status === "in_progress");
+  const completed = projects.filter((project) => project.status === "completed");
+  return (
+    <main className="projects-page">
+      <header>
+        <p className="eyebrow">Mes projets</p>
+        <h1>Retrouver toutes mes analyses.</h1>
+        <p className="intro">Un projet reste en cours tant qu’il n’a pas été publié. Une première publication le classe parmi les projets terminés, sans empêcher de le modifier ou de publier une nouvelle version.</p>
+      </header>
+      {error && <p className="error" role="alert">{error}</p>}
+      {loading && projects.length === 0 && <p className="projects-loading" role="status">Chargement des projets…</p>}
+      {!loading && projects.length === 0 && (
+        <section className="empty-projects">
+          <h2>Aucun projet pour le moment</h2>
+          <p>Revenez à l’accueil pour rechercher votre première source de données.</p>
+        </section>
+      )}
+      {inProgress.length > 0 && (
+        <ProjectGroup title="En cours" projects={inProgress} loading={loading} onOpen={onOpen} />
+      )}
+      {completed.length > 0 && (
+        <ProjectGroup title="Terminés et publiés" projects={completed} loading={loading} onOpen={onOpen} />
+      )}
     </main>
+  );
+}
+
+function ProjectGroup({
+  title,
+  projects,
+  loading,
+  onOpen,
+}: {
+  title: string;
+  projects: ProjectSummary[];
+  loading: boolean;
+  onOpen: (projectId: string) => void;
+}) {
+  return (
+    <section className="project-group">
+      <div className="project-group-heading"><h2>{title}</h2><span>{projects.length}</span></div>
+      <div className="project-list">
+        {projects.map((project) => (
+          <article className="project-summary-card" key={project.id}>
+            <div>
+              <p>{formatDate(project.created_at)}</p>
+              <h3>{project.title}</h3>
+              <ul>
+                {project.sources.map((source, index) => (
+                  <li key={`${source.title}:${index}`}>
+                    {source.title}{source.catalog_source ? ` · ${source.catalog_source}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="project-summary-actions">
+              <span>{project.source_count} source{project.source_count > 1 ? "s" : ""}</span>
+              {project.has_chart && <span>Graphique créé</span>}
+              {project.version_count > 0 && <span>{project.version_count} version{project.version_count > 1 ? "s" : ""} publiée{project.version_count > 1 ? "s" : ""}</span>}
+              <button onClick={() => onOpen(project.id)} disabled={loading}>Ouvrir le projet</button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -747,6 +983,7 @@ function SingleSourceChartBuilder({
   );
   const [title, setTitle] = useState(existing?.title ?? "Mon graphique");
   const [result, setResult] = useState<ChartResult | null>(existing);
+  const [preview, setPreview] = useState<ChartPreview | null>(null);
   const [calculating, setCalculating] = useState(false);
   const [error, setError] = useState("");
   const source = project.sources.find((item) => item.id === sourceId) ?? project.sources[0];
@@ -755,6 +992,35 @@ function SingleSourceChartBuilder({
   const allowedChartTypes: ChartResult["chart_type"][] = ["bar", "table"];
   if (categoryColumn && (isNumericColumn(categoryColumn) || isTemporalColumn(categoryColumn))) allowedChartTypes.splice(1, 0, "line");
   if (categoryColumn && isNumericColumn(categoryColumn)) allowedChartTypes.splice(-1, 0, "scatter");
+  const activePreview = preview
+    && preview.dataset_id === source.id
+    && preview.category_column === category
+    && preview.value_column === value
+    && preview.aggregation === aggregation
+    ? preview
+    : null;
+
+  useEffect(() => {
+    if (!category || !value || category === value) return;
+    let active = true;
+    fetch(`${apiUrl}/api/projects/${encodeURIComponent(project.id)}/chart-preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dataset_id: source.id,
+        category_column: category,
+        value_column: value,
+        aggregation,
+      }),
+    })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail ?? "Aperçu indisponible.");
+        if (active) setPreview(body);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [aggregation, category, project.id, source.id, value]);
 
   function chooseSource(id: string) {
     const next = project.sources.find((item) => item.id === id) ?? project.sources[0];
@@ -854,8 +1120,11 @@ function SingleSourceChartBuilder({
         <legend>Graphiques adaptés à ces colonnes</legend>
         {allowedChartTypes.map((type) => (
           <label className={chartType === type ? "selected" : ""} key={type}>
-            <input type="radio" name="chart-type" checked={chartType === type} onChange={() => setChartType(type)} />
-            <span><strong>{chartTypeLabels[type].title}</strong>{chartTypeLabels[type].detail}</span>
+            <span className="chart-choice-heading">
+              <input type="radio" name="chart-type" checked={chartType === type} onChange={() => setChartType(type)} />
+              <span><strong>{chartTypeLabels[type].title}</strong>{chartTypeLabels[type].detail}</span>
+            </span>
+            <ChartChoicePreview type={type} preview={activePreview} />
           </label>
         ))}
       </fieldset>
@@ -866,6 +1135,53 @@ function SingleSourceChartBuilder({
       </button>
       {result && <SingleChartView chart={result} />}
     </section>
+  );
+}
+
+function ChartChoicePreview({ type, preview }: { type: ChartResult["chart_type"]; preview: ChartPreview | null }) {
+  if (!preview) return <span className="chart-preview-waiting">Aperçu en préparation…</span>;
+  const rows = type === "scatter" ? preview.scatter_rows : preview.grouped_rows;
+  if (!rows.length) return <span className="chart-preview-waiting">Pas assez de valeurs compatibles</span>;
+
+  if (type === "bar") {
+    const values = preview.grouped_rows.slice(0, 8);
+    const maximum = Math.max(...values.map((row) => Math.abs(row.value)), 1);
+    return (
+      <span className="choice-bar-preview" aria-hidden="true">
+        {values.map((row) => <i key={row.label} style={{ height: `${Math.max(8, Math.abs(row.value) / maximum * 100)}%` }} />)}
+        <small>{preview.sampled_rows} premières lignes</small>
+      </span>
+    );
+  }
+
+  if (type === "table") {
+    return (
+      <span className="choice-table-preview" aria-hidden="true">
+        {preview.grouped_rows.slice(0, 3).map((row) => (
+          <i key={row.label}><b>{truncateLabel(row.label, 10)}</b><em>{formatNumber(row.value)}</em></i>
+        ))}
+        <small>{preview.sampled_rows} premières lignes</small>
+      </span>
+    );
+  }
+
+  const points = type === "scatter"
+    ? preview.scatter_rows.slice(0, 20).map((row) => ({ x: row.x, y: row.y }))
+    : preview.grouped_rows.slice(0, 20).map((row, index) => ({ x: index, y: row.value }));
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const x = (value: number) => 8 + ((value - minX) / (maxX - minX || 1)) * 144;
+  const y = (value: number) => 59 - ((value - minY) / (maxY - minY || 1)) * 48;
+  return (
+    <span className="choice-svg-preview" aria-hidden="true">
+      <svg viewBox="0 0 160 68">
+        {type === "line" && <polyline points={points.map((point) => `${x(point.x)},${y(point.y)}`).join(" ")} />}
+        {points.map((point, index) => <circle cx={x(point.x)} cy={y(point.y)} r={type === "scatter" ? 3 : 2.5} key={index} />)}
+      </svg>
+      <small>{preview.sampled_rows} premières lignes</small>
+    </span>
   );
 }
 

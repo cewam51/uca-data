@@ -14,6 +14,7 @@ from .catalog_importer import (
     import_best_insee_resource,
     import_best_research_data_gouv_resource,
     import_data_gouv_resource,
+    import_source_url,
 )
 from .catalogs import search_catalogs
 from .config import settings
@@ -72,6 +73,17 @@ class ChartCreate(BaseModel):
     chart_type: Literal["bar", "line", "scatter", "table"]
 
 
+class ChartPreviewCreate(BaseModel):
+    dataset_id: UUID
+    category_column: str = Field(min_length=1, max_length=300)
+    value_column: str = Field(min_length=1, max_length=300)
+    aggregation: Literal["sum", "average", "minimum", "maximum", "count"]
+
+
+class SourceUrlCreate(BaseModel):
+    url: str = Field(min_length=8, max_length=4000)
+
+
 class PublicationCreate(BaseModel):
     author_name: str = Field(min_length=2, max_length=80)
     title: str = Field(min_length=2, max_length=160)
@@ -125,6 +137,11 @@ def create_project(payload: ProjectCreate) -> dict:
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/api/projects")
+def list_projects() -> list[dict]:
+    return repository.list_projects()
 
 
 @app.get("/api/projects/{project_id}")
@@ -244,6 +261,22 @@ def create_project_chart(project_id: UUID, payload: ChartCreate) -> dict:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+@app.post("/api/projects/{project_id}/chart-preview")
+def preview_project_chart(project_id: UUID, payload: ChartPreviewCreate) -> dict:
+    try:
+        return project_analysis.preview_chart(
+            project_id,
+            payload.dataset_id,
+            payload.category_column.strip(),
+            payload.value_column.strip(),
+            payload.aggregation,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @app.get("/api/projects/{project_id}/versions")
 def list_project_versions(project_id: UUID) -> list[dict]:
     try:
@@ -297,6 +330,23 @@ async def search_datasets(
     limit: int = Query(default=6, ge=1, le=12),
 ) -> dict:
     return await search_catalogs(q.strip(), limit)
+
+
+@app.post("/api/sources/explore", status_code=201)
+def explore_source_url(
+    payload: SourceUrlCreate,
+    service: CsvUploadService = Depends(get_service),
+) -> dict:
+    try:
+        return import_source_url(payload.url.strip(), service)
+    except UploadTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except CatalogResourceError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="La source indiquée ne répond pas correctement.") from error
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="Cette source n’a pas pu être analysée.") from error
 
 
 @app.post("/api/catalogs/data-gouv/{dataset_id}/resources/{resource_id}/explore", status_code=201)

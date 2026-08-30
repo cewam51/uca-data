@@ -6,7 +6,7 @@ Prototype open source permettant de rechercher des données publiques, de choisi
 
 Permettre à une personne sans compétences techniques de :
 
-- rechercher simultanément dans plusieurs catalogues publics ;
+- rechercher simultanément dans plusieurs catalogues publics ou coller le lien d’une source précise ;
 - ouvrir une ressource sans manipuler directement de CSV ;
 - comprendre leur structure et leur provenance ;
 - analyser immédiatement un seul document et choisir librement deux colonnes ;
@@ -25,9 +25,11 @@ Permettre à une personne sans compétences techniques de :
 
 ## Fonctionnalités disponibles
 
-Le site recherche actuellement dans data.gouv.fr, data.europa.eu, Recherche Data Gouv et le catalogue officiel Melodi de l’Insee. Il affiche les résultats qui contiennent une table publique exploitable ou vérifiable, choisit automatiquement la meilleure ressource CSV ou TSV et l’ajoute au projet sans demander de fichier à l’utilisateur. Pour l’Insee, le CSV français est extrait automatiquement de l’archive officielle, quelle que soit sa taille ; le téléchargement et l’analyse utilisent le disque plutôt qu’un chargement complet en mémoire. Les résultats non tabulaires ou restreints ne sont pas affichés. Chaque table retenue est conservée sans modification, analysée avec DuckDB et identifiée par son empreinte SHA-256.
+Le site recherche actuellement dans data.gouv.fr, data.europa.eu, Recherche Data Gouv et le catalogue officiel Melodi de l’Insee. Le même champ accepte aussi le lien d’une fiche de ces catalogues ou un lien public direct vers une table CSV/TSV, afin d’ouvrir immédiatement une source déjà connue. Il affiche les résultats qui contiennent une table publique exploitable ou vérifiable, choisit automatiquement la meilleure ressource CSV ou TSV et l’ajoute au projet sans demander de fichier à l’utilisateur. Pour l’Insee, le CSV français est extrait automatiquement de l’archive officielle, quelle que soit sa taille ; le téléchargement et l’analyse utilisent le disque plutôt qu’un chargement complet en mémoire. Les résultats non tabulaires ou restreints ne sont pas affichés. Chaque table retenue est conservée sans modification, analysée avec DuckDB et identifiée par son empreinte SHA-256.
 
-Une première source crée un projet persistant et ouvre immédiatement l’espace d’analyse. L’utilisateur choisit une colonne de catégories, une colonne numérique, une agrégation et un graphique parmi ceux adaptés aux types retenus : barres, courbe, nuage de points ou tableau. Les réglages restent visibles pour être modifiés sans recommencer, et le résultat est conservé avec la provenance et l’empreinte du document.
+Une première source crée un projet persistant et ouvre immédiatement l’espace d’analyse. L’utilisateur choisit une colonne de catégories, une colonne numérique, une agrégation et un graphique parmi ceux adaptés aux types retenus : barres, courbe, nuage de points ou tableau. Chaque case de sélection affiche un véritable aperçu calculé sur les 20 premières lignes compatibles avant la création du graphique. Les réglages restent visibles pour être modifiés sans recommencer, et le résultat est conservé avec la provenance et l’empreinte du document.
+
+Une navigation permanente permet de revenir à l’accueil ou d’ouvrir « Mes projets » depuis n’importe quel écran. Cette page regroupe les projets en cours et les projets terminés, considérés comme tels dès qu’une première version a été publiée. Tous restent accessibles et modifiables.
 
 L’utilisateur peut aussi lancer une nouvelle recherche et ajouter un second document, mais ce choix reste facultatif. Chaque document peut être analysé séparément. Le second peut être retiré du projet sans supprimer la ressource conservée.
 

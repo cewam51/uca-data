@@ -7,6 +7,7 @@ from .analyzer import (
     analyze_join,
     calculate_indicator,
     calculate_single_source_chart,
+    preview_single_source_chart,
     profile_csv_columns,
 )
 from .repository import PostgresDatasetRepository
@@ -108,6 +109,31 @@ class ProjectAnalysisService:
             }
         )
         self.repository.save_chart(project_id, result)
+        return result
+
+    def preview_chart(
+        self,
+        project_id: UUID,
+        dataset_id: UUID,
+        category_column: str,
+        value_column: str,
+        aggregation: str,
+    ) -> dict[str, Any]:
+        files = self.repository.get_project_source_files(project_id)
+        source = next((item for item in files if item["id"] == str(dataset_id)), None)
+        if source is None:
+            raise ValueError("Cette source ne fait pas partie du projet.")
+        column_names = {column["name"] for column in source["columns"]}
+        for column_name in (category_column, value_column):
+            if column_name not in column_names:
+                raise ValueError(f"Colonne introuvable : {column_name}")
+        result = preview_single_source_chart(
+            self._source_path(source["stored_name"]),
+            category_column,
+            value_column,
+            aggregation,
+        )
+        result["dataset_id"] = source["id"]
         return result
 
     def calculate_indicator(

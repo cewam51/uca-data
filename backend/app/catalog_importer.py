@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import socket
 from tempfile import SpooledTemporaryFile
-from urllib.parse import quote, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlparse
 from zipfile import BadZipFile, ZipFile
 
 import httpx
@@ -17,6 +17,106 @@ class CatalogResourceError(ValueError):
 
 
 TABULAR_FORMATS = {"CSV", "TSV", "TAB"}
+
+
+def import_source_url(source_url: str, service: CsvUploadService) -> dict:
+    """Résout une fiche de catalogue connue ou importe une table publique directe."""
+    resolved = resolve_catalog_url(source_url)
+    if resolved:
+        source, identifier = resolved
+        if source == "data.gouv.fr":
+            return import_best_data_gouv_resource(identifier, service)
+        if source == "data.europa.eu":
+            return import_best_data_europa_resource(identifier, service)
+        if source == "Recherche Data Gouv":
+            return import_best_research_data_gouv_resource(identifier, service)
+        if source == "Insee":
+            return import_best_insee_resource(identifier, service)
+    return import_direct_tabular_url(source_url, service)
+
+
+def resolve_catalog_url(value: str) -> tuple[str, str] | None:
+    """Extrait l’identifiant d’un lien de fiche provenant d’un catalogue pris en charge."""
+    parsed = urlparse(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise CatalogResourceError("Le lien de la source doit commencer par http:// ou https://.")
+    host = parsed.hostname.lower().removeprefix("www.")
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+
+    if host == "data.gouv.fr" and "datasets" in parts:
+        index = parts.index("datasets")
+        if len(parts) > index + 1 and parts[index + 1] != "r":
+            return "data.gouv.fr", parts[index + 1]
+
+    if host == "data.europa.eu":
+        for marker in ("datasets", "dataset"):
+            if marker in parts:
+                index = parts.index(marker)
+                if len(parts) > index + 1:
+                    return "data.europa.eu", parts[index + 1]
+
+    if host == "catalogue-donnees.insee.fr" and "explorateur" in parts:
+        index = parts.index("explorateur")
+        if len(parts) > index + 1:
+            return "Insee", parts[index + 1]
+    if host == "api.insee.fr" and "catalog" in parts:
+        index = parts.index("catalog")
+        if len(parts) > index + 1:
+            return "Insee", parts[index + 1]
+
+    parameters = parse_qs(parsed.query)
+    persistent_id = (parameters.get("persistentId") or [""])[0]
+    if persistent_id.lower().startswith("doi:"):
+        return "Recherche Data Gouv", persistent_id
+    if host == "doi.org" and parts:
+        return "Recherche Data Gouv", f"doi:{'/'.join(parts)}"
+
+    return None
+
+
+def import_direct_tabular_url(source_url: str, service: CsvUploadService) -> dict:
+    """Télécharge une URL publique directe si elle contient effectivement un CSV ou TSV."""
+    timeout = httpx.Timeout(30, connect=5)
+    headers = {"User-Agent": "public-data-explorer/0.1"}
+    with httpx.Client(timeout=timeout, headers=headers) as client:
+        parsed = urlparse(source_url)
+        path_parts = [unquote(part) for part in parsed.path.split("/") if part]
+        suffix = Path(parsed.path).suffix.lower()
+        resource_format = "TSV" if suffix in {".tsv", ".tab"} else "CSV" if suffix == ".csv" else ""
+        name = Path(unquote(parsed.path)).name or "donnees"
+        if suffix not in {".csv", ".tsv", ".tab"} and "datasets" in path_parts:
+            dataset_index = path_parts.index("datasets")
+            if len(path_parts) > dataset_index + 1:
+                name = path_parts[dataset_index + 1]
+        with closing(_open_safe_stream(client, source_url)) as response:
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "").lower()
+            if "text/html" in content_type or "application/xhtml" in content_type:
+                raise CatalogResourceError(
+                    "Ce lien ouvre une page web. Collez le lien de la fiche d’un catalogue pris en charge ou le lien direct d’un CSV/TSV."
+                )
+            if not resource_format:
+                if "tab-separated-values" in content_type or "text/tsv" in content_type:
+                    resource_format = "TSV"
+                elif "csv" in content_type:
+                    resource_format = "CSV"
+            if not resource_format:
+                raise CatalogResourceError("Ce lien ne désigne pas une table CSV ou TSV identifiable.")
+
+            resource = {
+                "id": source_url,
+                "title": name,
+                "format": resource_format,
+                "url": source_url,
+                "filename": name,
+            }
+            return _download_open_response(
+                response,
+                source_url,
+                resource,
+                service,
+                (parsed.hostname or "Lien direct").removeprefix("www."),
+            )
 
 
 def import_data_gouv_resource(
@@ -354,40 +454,60 @@ def _download_and_import(
 
     with closing(_open_safe_stream(client, source_url)) as response:
         response.raise_for_status()
-        content_type = response.headers.get("content-type", "").lower()
-        if "text/html" in content_type or "application/xhtml" in content_type:
-            raise CatalogResourceError(
-                "La plateforme annonce une table mais renvoie seulement une page de présentation."
-            )
-        declared_size = int(response.headers.get("content-length") or 0)
-        if service.max_upload_bytes > 0 and declared_size > service.max_upload_bytes:
-            limit_mb = service.max_upload_bytes // (1024 * 1024)
-            raise UploadTooLargeError(
-                f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
-            )
+        return _download_open_response(
+            response,
+            dataset_id,
+            resource,
+            service,
+            catalog_source,
+        )
 
-        with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as temporary:
-            downloaded = 0
-            for chunk in response.iter_bytes(1024 * 1024):
-                downloaded += len(chunk)
-                if service.max_upload_bytes > 0 and downloaded > service.max_upload_bytes:
-                    limit_mb = service.max_upload_bytes // (1024 * 1024)
-                    raise UploadTooLargeError(
-                        f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
-                    )
-                temporary.write(chunk)
-            temporary.seek(0)
-            name = resource.get("filename") or resource.get("title") or f"{resource_id}"
-            if Path(str(name)).suffix.lower() not in {".csv", ".tsv", ".tab"}:
-                name = f"{name}.{_extension(resource_format)}"
-            try:
-                result = service.import_tabular(str(name), temporary)
-            except UploadTooLargeError:
-                raise
-            except ValueError as error:
-                raise CatalogResourceError(
-                    "La table fournie par la plateforme n’a pas pu être lue correctement."
-                ) from error
+
+def _download_open_response(
+    response: httpx.Response,
+    dataset_id: str,
+    resource: dict,
+    service: CsvUploadService,
+    catalog_source: str,
+) -> dict:
+    """Importe une réponse HTTP déjà ouverte, sans charger son contenu en mémoire."""
+    resource_id = resource.get("id")
+    resource_format = str(resource.get("format") or "").upper()
+    source_url = str(resource.get("url") or response.url)
+    content_type = response.headers.get("content-type", "").lower()
+    if "text/html" in content_type or "application/xhtml" in content_type:
+        raise CatalogResourceError(
+            "La plateforme annonce une table mais renvoie seulement une page de présentation."
+        )
+    declared_size = int(response.headers.get("content-length") or 0)
+    if service.max_upload_bytes > 0 and declared_size > service.max_upload_bytes:
+        limit_mb = service.max_upload_bytes // (1024 * 1024)
+        raise UploadTooLargeError(
+            f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
+        )
+
+    with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as temporary:
+        downloaded = 0
+        for chunk in response.iter_bytes(1024 * 1024):
+            downloaded += len(chunk)
+            if service.max_upload_bytes > 0 and downloaded > service.max_upload_bytes:
+                limit_mb = service.max_upload_bytes // (1024 * 1024)
+                raise UploadTooLargeError(
+                    f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
+                )
+            temporary.write(chunk)
+        temporary.seek(0)
+        name = resource.get("filename") or resource.get("title") or f"{resource_id}"
+        if Path(str(name)).suffix.lower() not in {".csv", ".tsv", ".tab"}:
+            name = f"{name}.{_extension(resource_format)}"
+        try:
+            result = service.import_tabular(str(name), temporary)
+        except UploadTooLargeError:
+            raise
+        except ValueError as error:
+            raise CatalogResourceError(
+                "La table fournie par la plateforme n’a pas pu être lue correctement."
+            ) from error
 
     result["catalog_source"] = catalog_source
     result["catalog_dataset_id"] = dataset_id

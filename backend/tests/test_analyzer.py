@@ -4,6 +4,7 @@ from app.analyzer import (
     analyze_join,
     calculate_indicator,
     calculate_single_source_chart,
+    preview_single_source_chart,
     profile_csv_columns,
 )
 
@@ -34,6 +35,22 @@ def test_scatter_uses_two_numeric_columns_without_filling_missing_values(tmp_pat
     assert result["rows"] == [{"x": 1.0, "y": 2.0}, {"x": 4.0, "y": 8.0}]
     assert result["excluded_rows"] == 1
     assert result["warnings"]
+
+
+def test_chart_preview_uses_only_first_twenty_compatible_rows(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text(
+        "categorie,x,valeur\n"
+        + "\n".join(f"A,{index},{index}" for index in range(1, 26))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = preview_single_source_chart(source, "categorie", "valeur", "sum")
+
+    assert result["sampled_rows"] == 20
+    assert result["grouped_rows"] == [{"label": "A", "value": 210.0}]
+    assert result["scatter_rows"] == []
 
 
 def test_profiles_columns_and_suggests_roles(tmp_path: Path):

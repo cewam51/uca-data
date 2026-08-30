@@ -30,6 +30,77 @@ OPERATIONS = {
 CHART_TYPES = {"bar", "line", "scatter", "table"}
 
 
+def preview_single_source_chart(
+    path: Path,
+    category_column: str,
+    value_column: str,
+    aggregation: str,
+    sample_limit: int = 20,
+) -> dict[str, Any]:
+    """Prépare les mini-aperçus à partir des premières lignes numériques utilisables."""
+    if aggregation not in AGGREGATIONS:
+        raise ValueError("Agrégation non autorisée.")
+    if category_column == value_column:
+        raise ValueError("Choisissez deux colonnes différentes.")
+
+    connection = duckdb.connect(":memory:")
+    try:
+        relation = connection.read_csv(str(path), header=True, auto_detect=True)
+        _require_column(relation.columns, category_column)
+        _require_column(relation.columns, value_column)
+        connection.register("source", relation)
+        category = _quote_identifier(category_column)
+        value = _quote_identifier(value_column)
+        rows = connection.execute(
+            f"""
+            SELECT CAST({category} AS VARCHAR) AS label,
+                   try_cast({category} AS DOUBLE) AS numeric_category,
+                   try_cast({value} AS DOUBLE) AS numeric_value
+            FROM source
+            WHERE {category} IS NOT NULL
+              AND trim(CAST({category} AS VARCHAR)) <> ''
+              AND try_cast({value} AS DOUBLE) IS NOT NULL
+            LIMIT ?
+            """,
+            [sample_limit],
+        ).fetchall()
+
+        grouped: dict[str, list[float]] = {}
+        for label, _, numeric_value in rows:
+            grouped.setdefault(label, []).append(float(numeric_value))
+        grouped_rows = [
+            {"label": label, "value": _rounded(_aggregate_preview(values, aggregation))}
+            for label, values in grouped.items()
+        ]
+        scatter_rows = [
+            {"x": _rounded(numeric_category), "y": _rounded(numeric_value)}
+            for _, numeric_category, numeric_value in rows
+            if numeric_category is not None
+        ]
+        return {
+            "category_column": category_column,
+            "value_column": value_column,
+            "aggregation": aggregation,
+            "sampled_rows": len(rows),
+            "grouped_rows": grouped_rows,
+            "scatter_rows": scatter_rows,
+        }
+    finally:
+        connection.close()
+
+
+def _aggregate_preview(values: list[float], aggregation: str) -> float:
+    if aggregation == "sum":
+        return sum(values)
+    if aggregation == "average":
+        return sum(values) / len(values)
+    if aggregation == "minimum":
+        return min(values)
+    if aggregation == "maximum":
+        return max(values)
+    return float(len(values))
+
+
 def calculate_single_source_chart(
     path: Path,
     category_column: str,

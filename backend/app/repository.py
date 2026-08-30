@@ -281,6 +281,41 @@ class PostgresDatasetRepository:
             "version_count": project[6],
         }
 
+    def list_projects(self) -> list[dict[str, Any]]:
+        with psycopg.connect(self.database_url) as connection:
+            rows = connection.execute(
+                """
+                SELECT p.id, p.title, p.created_at,
+                       (SELECT count(*) FROM project_sources ps WHERE ps.project_id = p.id),
+                       (SELECT count(*) FROM project_versions pv WHERE pv.project_id = p.id),
+                       p.chart_json IS NOT NULL,
+                       COALESCE((
+                           SELECT jsonb_agg(jsonb_build_object(
+                               'title', COALESCE(ps.label, d.original_name),
+                               'catalog_source', d.provenance_json->>'catalog_source'
+                           ) ORDER BY ps.position)
+                           FROM project_sources ps
+                           JOIN datasets d ON d.id = ps.dataset_id
+                           WHERE ps.project_id = p.id
+                       ), '[]'::jsonb)
+                FROM projects p
+                ORDER BY p.created_at DESC, p.id DESC
+                """
+            ).fetchall()
+        return [
+            {
+                "id": str(row[0]),
+                "title": row[1],
+                "created_at": row[2].isoformat(),
+                "source_count": row[3],
+                "version_count": row[4],
+                "has_chart": row[5],
+                "sources": row[6],
+                "status": "completed" if row[4] > 0 else "in_progress",
+            }
+            for row in rows
+        ]
+
     def remove_project_source(self, project_id: UUID, dataset_id: UUID) -> dict[str, Any]:
         with psycopg.connect(self.database_url) as connection:
             rows = connection.execute(

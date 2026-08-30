@@ -8,10 +8,12 @@ import pytest
 from app.catalog_importer import (
     CatalogResourceError,
     _data_europa_tabular_resources,
+    _download_open_response,
     _import_insee_archive,
     _research_data_gouv_tabular_resources,
     _select_best_data_gouv_resource,
     _validate_public_url,
+    resolve_catalog_url,
 )
 from app.catalogs import search_data_europa, search_data_gouv, search_insee, search_recherche_data_gouv
 from app.catalogs import _is_usable_result
@@ -162,6 +164,49 @@ def test_normalizes_research_data_result():
 def test_blocks_non_public_download_addresses(url):
     with pytest.raises(CatalogResourceError):
         _validate_public_url(url)
+
+
+@pytest.mark.parametrize(("url", "expected"), [
+    ("https://www.data.gouv.fr/fr/datasets/population-communale/", ("data.gouv.fr", "population-communale")),
+    ("https://data.europa.eu/data/datasets/emploi-1?locale=fr", ("data.europa.eu", "emploi-1")),
+    ("https://catalogue-donnees.insee.fr/fr/explorateur/DS_POPULATION", ("Insee", "DS_POPULATION")),
+    ("https://entrepot.recherche.data.gouv.fr/dataset.xhtml?persistentId=doi:10.57745/ABCD", ("Recherche Data Gouv", "doi:10.57745/ABCD")),
+    ("https://doi.org/10.57745/ABCD", ("Recherche Data Gouv", "doi:10.57745/ABCD")),
+])
+def test_resolves_supported_catalog_links(url, expected):
+    assert resolve_catalog_url(url) == expected
+
+
+def test_keeps_direct_data_gouv_resource_as_a_file_url():
+    assert resolve_catalog_url("https://www.data.gouv.fr/fr/datasets/r/file-id") is None
+
+
+def test_imports_an_open_direct_csv_response(tmp_path):
+    repository = MemoryRepository()
+    service = CsvUploadService(tmp_path, 0, repository)
+    response = httpx.Response(
+        200,
+        headers={"content-type": "text/csv"},
+        content=b"commune,population\nParis,2100000\n",
+        request=httpx.Request("GET", "https://example.test/population.csv"),
+    )
+
+    result = _download_open_response(
+        response,
+        "https://example.test/population.csv",
+        {
+            "id": "https://example.test/population.csv",
+            "title": "population.csv",
+            "format": "CSV",
+            "url": "https://example.test/population.csv",
+        },
+        service,
+        "example.test",
+    )
+
+    assert result["row_count"] == 1
+    assert result["catalog_source"] == "example.test"
+    assert result["source_url"] == "https://example.test/population.csv"
 
 
 def test_automatically_selects_latest_available_main_csv():

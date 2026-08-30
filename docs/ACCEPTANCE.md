@@ -4,7 +4,7 @@ Date de la dernière vérification : 30 août 2026.
 
 ## Scénario principal : un seul document
 
-La recherche `voiture` interroge simultanément les trois catalogues et retourne uniquement des tables utilisables :
+La recherche `voiture` interroge simultanément les quatre catalogues et retourne uniquement des tables utilisables :
 
 - data.gouv.fr : 6 résultats ;
 - data.europa.eu : 5 résultats ;
@@ -20,6 +20,13 @@ Le parcours principal utilise la table publique `11_02_voitures_traction-ssd` de
 - la somme des voitures est calculée pour chaque année de 2017 à 2025 ;
 - la formule, les exclusions éventuelles, la provenance et l’empreinte restent visibles ;
 - les colonnes, l’agrégation et le type de graphique restent modifiables après le résultat.
+- chaque case de type de graphique présente, avant validation, un aperçu basé sur au plus 20 premières lignes compatibles ;
+- le calcul d’aperçu ne remplace pas le graphique déjà enregistré dans le projet.
+- les boutons permanents `Accueil` et `Mes projets` restent accessibles depuis la recherche, l’analyse et une fiche publiée ;
+- la liste des projets sépare les projets sans publication, encore en cours, de ceux possédant au moins une version publiée, considérés comme terminés ;
+- chaque projet de la liste peut être rouvert pour poursuivre l’analyse.
+
+Le champ de recherche accepte également une URL. Une fiche data.gouv.fr, data.europa.eu, Recherche Data Gouv ou Insee est résolue directement ; un lien public CSV/TSV est analysé sans passer par une liste de résultats. Les adresses privées et les pages HTML sont refusées.
 
 Une recherche `population commune` retourne également des jeux Insee. `DS_POPULATIONS_REFERENCE` est résolu via Melodi, son archive officielle fournit automatiquement `DS_POPULATIONS_REFERENCE_2023_data.csv`, soit 106 065 lignes et 6 colonnes, sans demander de fichier à l’utilisateur.
 
@@ -54,7 +61,7 @@ Les deux ressources sont téléchargées par le backend, sans fichier demandé �
 
 ## Vérifications automatisées
 
-- tests backend : 28 réussis ;
+- tests backend : 36 réussis ;
 - compilation de production frontend et backend : réussie ;
 - analyse statique frontend : réussie ;
 - audit des dépendances frontend : aucune vulnérabilité détectée ;

@@ -27,6 +27,7 @@ def test_project_can_receive_two_persisted_sources():
     paths = app.openapi()["paths"]
 
     assert "post" in paths["/api/projects"]
+    assert "get" in paths["/api/projects"]
     assert "get" in paths["/api/projects/{project_id}"]
     assert "post" in paths["/api/projects/{project_id}/sources"]
     assert "get" in paths["/api/projects/{project_id}/qualification"]
@@ -34,6 +35,8 @@ def test_project_can_receive_two_persisted_sources():
     assert "post" in paths["/api/projects/{project_id}/join-analysis"]
     assert "post" in paths["/api/projects/{project_id}/indicator"]
     assert "post" in paths["/api/projects/{project_id}/chart"]
+    assert "post" in paths["/api/projects/{project_id}/chart-preview"]
+    assert "post" in paths["/api/sources/explore"]
     assert "delete" in paths["/api/projects/{project_id}/sources/{dataset_id}"]
     assert "get" in paths["/api/projects/{project_id}/versions"]
     assert "post" in paths["/api/projects/{project_id}/versions"]
