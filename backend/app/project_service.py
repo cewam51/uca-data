@@ -3,7 +3,12 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from .analyzer import analyze_join, calculate_indicator, profile_csv_columns
+from .analyzer import (
+    analyze_join,
+    calculate_indicator,
+    calculate_single_source_chart,
+    profile_csv_columns,
+)
 from .repository import PostgresDatasetRepository
 
 
@@ -53,6 +58,57 @@ class ProjectAnalysisService:
         ]
         self.repository.save_join_analysis(project_id, analysis)
         return analysis
+
+    def calculate_chart(
+        self,
+        project_id: UUID,
+        title: str,
+        dataset_id: UUID,
+        category_column: str,
+        value_column: str,
+        aggregation: str,
+        chart_type: str,
+    ) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        files = self.repository.get_project_source_files(project_id)
+        source = next((item for item in files if item["id"] == str(dataset_id)), None)
+        if source is None:
+            raise ValueError("Cette source ne fait pas partie du projet.")
+        columns_by_name = {column["name"]: column for column in source["columns"]}
+        for column_name in (category_column, value_column):
+            if column_name not in columns_by_name:
+                raise ValueError(f"Colonne introuvable : {column_name}")
+        numeric_prefixes = (
+            "TINYINT", "UTINYINT", "SMALLINT", "USMALLINT", "INTEGER",
+            "UINTEGER", "BIGINT", "UBIGINT", "HUGEINT", "FLOAT", "DOUBLE",
+            "DECIMAL", "REAL",
+        )
+        if not columns_by_name[value_column]["type"].startswith(numeric_prefixes):
+            raise ValueError(f"La colonne « {value_column} » n’est pas numérique.")
+        if chart_type == "scatter" and not columns_by_name[category_column]["type"].startswith(numeric_prefixes):
+            raise ValueError("Un nuage de points nécessite deux colonnes numériques.")
+
+        result = calculate_single_source_chart(
+            self._source_path(source["stored_name"]),
+            category_column,
+            value_column,
+            aggregation,
+            chart_type,
+        )
+        project_source = next(item for item in project["sources"] if item["id"] == source["id"])
+        result.update(
+            {
+                "title": title,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "source": {
+                    "dataset_id": source["id"],
+                    "title": project_source["title"],
+                    "sha256": project_source["sha256"],
+                },
+            }
+        )
+        self.repository.save_chart(project_id, result)
+        return result
 
     def calculate_indicator(
         self,

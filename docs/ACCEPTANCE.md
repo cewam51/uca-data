@@ -2,15 +2,30 @@
 
 Date de la dernière vérification : 29 août 2026.
 
-## Scénario public réel
+## Scénario principal : un seul document
 
 La recherche `voiture` interroge simultanément les trois catalogues et retourne uniquement des tables utilisables :
 
 - data.gouv.fr : 6 résultats ;
 - data.europa.eu : 5 résultats ;
 - Recherche Data Gouv : 1 résultat.
+- Insee : catalogue disponible, aucun résultat assez compact pour ce mot-clé ; aucun fichier trop volumineux n’est affiché comme utilisable.
 
-Le parcours complet utilise ensuite deux tables publiques de data.europa.eu :
+Le parcours principal utilise la table publique `11_02_voitures_traction-ssd` de data.europa.eu. Dès son ajout :
+
+- le projet s’ouvre sans exiger un second document ;
+- les 11 colonnes sont disponibles avec types et exemples ;
+- l’utilisateur choisit `Année` et `Voitures` ;
+- une courbe est proposée car l’axe est temporel ;
+- la somme des voitures est calculée pour chaque année de 2017 à 2025 ;
+- la formule, les exclusions éventuelles, la provenance et l’empreinte restent visibles ;
+- les colonnes, l’agrégation et le type de graphique restent modifiables après le résultat.
+
+Une recherche `population commune` retourne également des jeux Insee. `DS_POPULATIONS_REFERENCE` est résolu via Melodi, son archive officielle fournit automatiquement `DS_POPULATIONS_REFERENCE_2023_data.csv`, soit 106 065 lignes et 6 colonnes, sans demander de fichier à l’utilisateur.
+
+## Scénario facultatif : deux documents
+
+Le parcours ajoute ensuite une deuxième table publique de data.europa.eu :
 
 1. `11_02_voitures_traction-ssd` — voitures par type de traction ;
 2. `11_02_voitures_boite_vitesses-ssd` — voitures par type de boîte de vitesses.
@@ -37,7 +52,7 @@ Les deux ressources sont téléchargées par le backend, sans fichier demandé �
 
 ## Vérifications automatisées
 
-- tests backend : 24 réussis ;
+- tests backend : 28 réussis ;
 - compilation de production frontend et backend : réussie ;
 - analyse statique frontend : réussie ;
 - audit des dépendances frontend : aucune vulnérabilité détectée ;

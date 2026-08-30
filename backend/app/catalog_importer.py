@@ -5,6 +5,7 @@ import re
 import socket
 from tempfile import SpooledTemporaryFile
 from urllib.parse import quote, urlencode, urljoin, urlparse
+from zipfile import BadZipFile, ZipFile
 
 import httpx
 
@@ -79,6 +80,110 @@ def import_best_research_data_gouv_resource(
             service,
             "Recherche Data Gouv",
         )
+
+
+def import_best_insee_resource(dataset_id: str, service: CsvUploadService) -> dict:
+    """Récupère le CSV français exact d'un jeu du catalogue officiel Melodi."""
+    if not re.fullmatch(r"[A-Z0-9_-]{2,160}", dataset_id):
+        raise CatalogResourceError("Identifiant de jeu de données Insee invalide.")
+    timeout = httpx.Timeout(45, connect=5)
+    headers = {"User-Agent": "public-data-explorer/0.1"}
+    with httpx.Client(timeout=timeout, headers=headers) as client:
+        response = client.get(
+            f"https://api.insee.fr/melodi/catalog/{quote(dataset_id, safe='')}"
+        )
+        response.raise_for_status()
+        products = response.json().get("product") or []
+        candidates = [
+            product for product in products
+            if str(product.get("format") or "").upper() == "CSV"
+            and str(product.get("language") or "").upper() == "FR"
+            and product.get("accessURL")
+        ]
+        if not candidates:
+            raise CatalogResourceError(
+                "Ce jeu Insee ne contient pas de table CSV française directement utilisable."
+            )
+        candidates.sort(
+            key=lambda product: product.get("modified") or product.get("issued") or "",
+            reverse=True,
+        )
+        product = candidates[0]
+        resource = {
+            "id": product.get("id"),
+            "title": product.get("title") or dataset_id,
+            "url": product.get("accessURL"),
+            "size": product.get("byteSize"),
+        }
+        return _download_and_import_insee_archive(
+            client, dataset_id, resource, service
+        )
+
+
+def _download_and_import_insee_archive(
+    client: httpx.Client,
+    dataset_id: str,
+    resource: dict,
+    service: CsvUploadService,
+) -> dict:
+    source_url = resource.get("url")
+    if not source_url:
+        raise CatalogResourceError("L’Insee ne fournit pas d’adresse de téléchargement.")
+    with closing(_open_safe_stream(client, source_url)) as response:
+        response.raise_for_status()
+        declared_size = int(response.headers.get("content-length") or 0)
+        if declared_size > service.max_upload_bytes:
+            limit_mb = service.max_upload_bytes // (1024 * 1024)
+            raise UploadTooLargeError(
+                f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
+            )
+        with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as archive_file:
+            downloaded = 0
+            for chunk in response.iter_bytes(1024 * 1024):
+                downloaded += len(chunk)
+                if downloaded > service.max_upload_bytes:
+                    raise UploadTooLargeError("L’archive Insee dépasse la taille maximale autorisée.")
+                archive_file.write(chunk)
+            archive_file.seek(0)
+            result = _import_insee_archive(archive_file, service)
+
+    result["catalog_source"] = "Insee"
+    result["catalog_dataset_id"] = dataset_id
+    result["catalog_resource_id"] = resource.get("id")
+    result["source_url"] = source_url
+    service.attach_provenance(result)
+    return result
+
+
+def _import_insee_archive(archive_file, service: CsvUploadService) -> dict:
+    try:
+        with ZipFile(archive_file) as archive:
+            csv_entries = [
+                entry for entry in archive.infolist()
+                if not entry.is_dir()
+                and entry.filename.lower().endswith(".csv")
+                and "metadata" not in entry.filename.lower()
+            ]
+            preferred = [entry for entry in csv_entries if entry.filename.lower().endswith("_data.csv")]
+            entry = (preferred or csv_entries)[0] if (preferred or csv_entries) else None
+            if entry is None:
+                raise CatalogResourceError("L’archive Insee ne contient pas de table de données CSV.")
+            if entry.file_size > service.max_upload_bytes:
+                limit_mb = service.max_upload_bytes // (1024 * 1024)
+                raise UploadTooLargeError(
+                    f"La table Insee décompressée dépasse la capacité du prototype ({limit_mb} Mo)."
+                )
+            with archive.open(entry) as source, SpooledTemporaryFile(max_size=8 * 1024 * 1024) as table:
+                copied = 0
+                while chunk := source.read(1024 * 1024):
+                    copied += len(chunk)
+                    if copied > service.max_upload_bytes:
+                        raise UploadTooLargeError("La table Insee dépasse la taille maximale autorisée.")
+                    table.write(chunk)
+                table.seek(0)
+                return service.import_tabular(Path(entry.filename).name, table)
+    except BadZipFile as error:
+        raise CatalogResourceError("L’archive fournie par l’Insee n’est pas lisible.") from error
 
 
 def _select_best_data_gouv_resource(resources: list[dict]) -> dict:

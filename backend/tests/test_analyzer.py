@@ -1,6 +1,39 @@
 from pathlib import Path
 
-from app.analyzer import analyze_join, calculate_indicator, profile_csv_columns
+from app.analyzer import (
+    analyze_join,
+    calculate_indicator,
+    calculate_single_source_chart,
+    profile_csv_columns,
+)
+
+
+def test_single_source_chart_aggregates_selected_columns(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text(
+        "annee,commune,valeur\n2023,Paris,10\n2023,Lyon,5\n2024,Paris,8\n",
+        encoding="utf-8",
+    )
+
+    result = calculate_single_source_chart(source, "annee", "valeur", "sum", "line")
+
+    assert result["formula"] == "Somme de « valeur » pour chaque « annee »"
+    assert result["result_count"] == 2
+    assert result["rows"] == [
+        {"label": "2023", "value": 15.0},
+        {"label": "2024", "value": 8.0},
+    ]
+
+
+def test_scatter_uses_two_numeric_columns_without_filling_missing_values(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text("x,y\n1,2\n3,inconnu\n4,8\n", encoding="utf-8")
+
+    result = calculate_single_source_chart(source, "x", "y", "average", "scatter")
+
+    assert result["rows"] == [{"x": 1.0, "y": 2.0}, {"x": 4.0, "y": 8.0}]
+    assert result["excluded_rows"] == 1
+    assert result["warnings"]
 
 
 def test_profiles_columns_and_suggests_roles(tmp_path: Path):

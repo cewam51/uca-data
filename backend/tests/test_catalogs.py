@@ -1,4 +1,6 @@
 import asyncio
+from io import BytesIO
+from zipfile import ZipFile
 
 import httpx
 import pytest
@@ -6,12 +8,70 @@ import pytest
 from app.catalog_importer import (
     CatalogResourceError,
     _data_europa_tabular_resources,
+    _import_insee_archive,
     _research_data_gouv_tabular_resources,
     _select_best_data_gouv_resource,
     _validate_public_url,
 )
-from app.catalogs import search_data_europa, search_data_gouv, search_recherche_data_gouv
+from app.catalogs import search_data_europa, search_data_gouv, search_insee, search_recherche_data_gouv
 from app.catalogs import _is_usable_result
+from app.service import CsvUploadService
+
+
+class MemoryRepository:
+    def __init__(self):
+        self.saved = []
+
+    def save(self, dataset):
+        self.saved.append(dataset)
+
+    def update_provenance(self, dataset):
+        pass
+
+
+def test_searches_official_insee_catalog_and_keeps_french_csv():
+    def handler(request):
+        assert request.url.path == "/melodi/catalog/all"
+        return httpx.Response(200, json=[{
+            "identifier": "DS_POP_TEST",
+            "title": [{"content": "Population par commune", "lang": "fr"}],
+            "abstract": [{"content": "Population municipale annuelle", "lang": "fr"}],
+            "modified": "2026-08-01",
+            "product": [{
+                "id": "DS_POP_TEST_CSV_FR",
+                "format": "CSV",
+                "language": "FR",
+                "accessURL": "https://api.insee.fr/melodi/file/test",
+                "byteSize": 123,
+            }],
+        }])
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await search_insee(client, "population commune", 5)
+
+    result = asyncio.run(run())[0]
+    assert result["id"] == "DS_POP_TEST"
+    assert result["source"] == "Insee"
+    assert result["formats"] == ["CSV"]
+    assert result["can_explore"] is True
+
+
+def test_imports_data_csv_from_insee_zip_without_using_metadata_file(tmp_path):
+    archive = BytesIO()
+    with ZipFile(archive, "w") as zipped:
+        zipped.writestr("DS_TEST_data.csv", "GEO;TIME_PERIOD;OBS_VALUE\n75056;2024;2100000\n69123;2024;520000\n")
+        zipped.writestr("DS_TEST_metadata.csv", "COD_VAR;LIB_VAR\nGEO;Géographie\n")
+    archive.seek(0)
+    service = CsvUploadService(tmp_path, 1024 * 1024, MemoryRepository())
+
+    result = _import_insee_archive(archive, service)
+
+    assert result["original_name"] == "DS_TEST_data.csv"
+    assert result["row_count"] == 2
+    assert [column["name"] for column in result["columns"]] == [
+        "GEO", "TIME_PERIOD", "OBS_VALUE",
+    ]
 
 
 def test_normalizes_data_gouv_result():

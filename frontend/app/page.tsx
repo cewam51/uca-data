@@ -112,6 +112,24 @@ type IndicatorResult = {
   }[];
 };
 
+type ChartRow = { label?: string; value?: number; x?: number; y?: number };
+
+type ChartResult = {
+  title: string;
+  created_at: string;
+  chart_type: "bar" | "line" | "scatter" | "table";
+  category_column: string;
+  value_column: string;
+  aggregation: string;
+  formula: string;
+  result_count: number;
+  displayed_count: number;
+  excluded_rows: number;
+  warnings: string[];
+  rows: ChartRow[];
+  source: { dataset_id: string; title: string; sha256: string };
+};
+
 type Project = {
   id: string;
   title: string;
@@ -119,6 +137,7 @@ type Project = {
   sources: ProjectSource[];
   join_analysis?: JoinAnalysis | null;
   indicator?: IndicatorResult | null;
+  chart?: ChartResult | null;
   version_count?: number;
 };
 
@@ -185,6 +204,7 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const examples = ["population par commune", "parc automobile", "consommation électrique"];
 
 export default function Home() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchResponse | null>(null);
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -193,6 +213,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [exploring, setExploring] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -252,6 +273,8 @@ export default function Home() {
       endpoint = `${apiUrl}/api/catalogs/data-europa/explore?dataset_id=${encodeURIComponent(result.id)}`;
     } else if (result.source === "Recherche Data Gouv") {
       endpoint = `${apiUrl}/api/catalogs/recherche-data-gouv/explore?persistent_id=${encodeURIComponent(result.id)}`;
+    } else if (result.source === "Insee") {
+      endpoint = `${apiUrl}/api/catalogs/insee/${encodeURIComponent(result.id)}/explore`;
     } else {
       return;
     }
@@ -285,8 +308,9 @@ export default function Home() {
       const projectBody = await projectResponse.json();
       if (!projectResponse.ok) throw new Error(projectBody.detail ?? "La source n’a pas pu être ajoutée au projet.");
       setProject(projectBody);
+      setShowSearch(false);
       window.history.replaceState({}, "", `${window.location.pathname}?project=${encodeURIComponent(projectBody.id)}`);
-      setDataset(body);
+      setDataset(null);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cette ressource ne peut pas être explorée.");
@@ -296,6 +320,31 @@ export default function Home() {
   }
 
   if (publication) return <PublishedSheet publication={publication} />;
+
+  if (project && !showSearch) {
+    return (
+      <FlexibleWorkspace
+        project={project}
+        onProjectChange={setProject}
+        onNewProject={() => {
+          setProject(null);
+          setDataset(null);
+          setSearch(null);
+          setQuery("");
+          setError("");
+          setShowSearch(false);
+          router.replace("/");
+        }}
+        onAddSource={() => {
+          setShowSearch(true);
+          setSearch(null);
+          setQuery("");
+          setError("");
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+      />
+    );
+  }
 
   if (dataset) {
     return (
@@ -318,36 +367,19 @@ export default function Home() {
     );
   }
 
-  if (project?.sources.length === 2) {
-    return (
-      <main>
-        <header>
-          <p className="eyebrow">Explorateur de données publiques</p>
-          <h1>Vérifier que les sources parlent des mêmes lieux.</h1>
-          <p className="intro">Choisissez les colonnes comparables. Le site mesure ensuite les correspondances et signale ce qui demande votre attention.</p>
-        </header>
-        <Journey project={project} />
-        <ProjectSources project={project} />
-        <section className="dataset-view workspace-view">
-          <ColumnQualification project={project} onProjectChange={setProject} />
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main>
       <header>
         <p className="eyebrow">Explorateur de données publiques</p>
-        <h1>{project ? "Trouver une deuxième source." : "Trouver les faits derrière une question."}</h1>
+        <h1>{project ? "Ajouter un document, si vous en avez besoin." : "Trouver les faits derrière une question."}</h1>
         <p className="intro">{project
-          ? "Votre première source est conservée. Cherchez maintenant les données à mettre en regard."
+          ? "Votre analyse actuelle est conservée. Choisissez un autre document public, puis vous déciderez de l’utiliser seul ou de le relier au premier."
           : "Écrivez simplement ce que vous cherchez. Le site s’occupe de trouver et d’ouvrir les fichiers techniques."}</p>
       </header>
 
-      <Journey project={project} />
-
       {project && <ProjectSources project={project} compact />}
+
+      {project && <button className="back" onClick={() => setShowSearch(false)}>← Revenir à mon analyse</button>}
 
       <section className="search-card" aria-label="Recherche de données publiques">
         <form className="search-form" onSubmit={submit}>
@@ -424,18 +456,6 @@ function SearchResults({
   );
 }
 
-function Journey({ project }: { project: Project | null }) {
-  return (
-    <div className="journey" aria-label="Parcours de création">
-      <span className="active"><b>1</b>Trouver des données</span>
-      <span className={project ? "active" : ""}><b>2</b>Ajouter une deuxième source</span>
-      <span className={project?.sources.length === 2 ? "active" : ""}><b>3</b>Vérifier le croisement</span>
-      <span className={project?.indicator ? "active" : ""}><b>4</b>Créer un indicateur</span>
-      <span className={(project?.version_count ?? 0) > 0 ? "active" : ""}><b>5</b>Publier une fiche</span>
-    </div>
-  );
-}
-
 function ResultCard({
   result,
   exploring,
@@ -470,7 +490,7 @@ function ResultCard({
               : result.can_check
                 ? "Vérifier et utiliser"
                 : addingSecond
-                  ? "Ajouter comme 2e source"
+                  ? "Ajouter ce document"
                   : "Utiliser ces données"}
         </button>
         {result.url && <a href={result.url} target="_blank" rel="noreferrer">Voir la fiche source ↗</a>}
@@ -542,19 +562,336 @@ function ProjectSources({ project, compact = false }: { project: Project; compac
           const source = project.sources[index];
           return source ? (
             <div className="source-slot filled" key={source.id}>
-              <span>Source {index + 1}</span>
+              <span>Document {index + 1}</span>
               <strong>{source.title}</strong>
               <small>{source.publisher ? `${source.publisher} · ` : ""}{source.catalog_source ?? "Source publique"} · {source.row_count.toLocaleString("fr-FR")} lignes</small>
             </div>
           ) : (
             <div className="source-slot" key={`empty-${index}`}>
-              <span>Source {index + 1}</span>
-              <strong>À rechercher</strong>
+              <span>Document {index + 1} · facultatif</span>
+              <strong>Vous pouvez continuer sans l’ajouter</strong>
             </div>
           );
         })}
       </div>
     </section>
+  );
+}
+
+function FlexibleWorkspace({
+  project,
+  onProjectChange,
+  onAddSource,
+  onNewProject,
+}: {
+  project: Project;
+  onProjectChange: (project: Project) => void;
+  onAddSource: () => void;
+  onNewProject: () => void;
+}) {
+  const [qualified, setQualified] = useState<Project | null>(null);
+  const [mode, setMode] = useState<"chart" | "join">("chart");
+  const [loading, setLoading] = useState(true);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState("");
+  const sourceIds = project.sources.map((source) => source.id).join(",");
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${apiUrl}/api/projects/${encodeURIComponent(project.id)}/qualification`)
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail ?? "Les colonnes n’ont pas pu être analysées.");
+        if (active) setQualified(body);
+      })
+      .catch((reason) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Les colonnes n’ont pas pu être analysées.");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [project.id, sourceIds]);
+
+  async function removeSecondSource() {
+    const second = project.sources[1];
+    if (!second) return;
+    setRemoving(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `${apiUrl}/api/projects/${encodeURIComponent(project.id)}/sources/${encodeURIComponent(second.id)}`,
+        { method: "DELETE" },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Le document n’a pas pu être retiré.");
+      setMode("chart");
+      setLoading(true);
+      setQualified(null);
+      onProjectChange(body);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Le document n’a pas pu être retiré.");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  return (
+    <main>
+      <header className="workspace-header">
+        <p className="eyebrow">Espace d’analyse</p>
+        <h1>Choisir, essayer, modifier.</h1>
+        <p className="intro">Un document suffit. Sélectionnez deux colonnes et un graphique ; vous pourrez changer chaque choix à tout moment.</p>
+      </header>
+
+      <ProjectSources project={project} />
+      <div className="source-actions">
+        {project.sources.length < 2 ? (
+          <button onClick={onAddSource}>Ajouter un autre document <small>facultatif</small></button>
+        ) : (
+          <button className="secondary" onClick={removeSecondSource} disabled={removing}>
+            {removing ? "Retrait…" : "Retirer le deuxième document"}
+          </button>
+        )}
+        <button className="text-button" onClick={onNewProject}>Commencer un nouveau projet</button>
+      </div>
+      {error && <p className="error" role="alert">{error}</p>}
+
+      {project.sources.length === 2 && (
+        <nav className="workspace-modes" aria-label="Type d’analyse">
+          <button className={mode === "chart" ? "active" : ""} onClick={() => setMode("chart")}>
+            <strong>Graphique d’un document</strong>
+            <span>Utiliser deux colonnes d’une source</span>
+          </button>
+          <button className={mode === "join" ? "active" : ""} onClick={() => setMode("join")}>
+            <strong>Relier deux documents</strong>
+            <span>Choisir une colonne commune</span>
+          </button>
+        </nav>
+      )}
+
+      <section className="dataset-view flexible-view">
+        {loading && <p className="qualification-loading" role="status">Lecture des colonnes…</p>}
+        {!loading && qualified && mode === "chart" && (
+          <SingleSourceChartBuilder
+            project={qualified}
+            existing={qualified.chart ?? project.chart ?? null}
+            onChartChange={(chart) => {
+              const updated = { ...project, chart };
+              setQualified((current) => current ? { ...current, chart } : current);
+              onProjectChange(updated);
+            }}
+          />
+        )}
+        {!loading && qualified && mode === "join" && (
+          <ColumnQualification project={qualified} onProjectChange={onProjectChange} />
+        )}
+      </section>
+    </main>
+  );
+}
+
+const chartTypeLabels = {
+  bar: { title: "Barres", detail: "Comparer des catégories" },
+  line: { title: "Courbe", detail: "Suivre une évolution" },
+  scatter: { title: "Nuage de points", detail: "Voir une relation entre deux nombres" },
+  table: { title: "Tableau", detail: "Lire les valeurs précisément" },
+} as const;
+
+function SingleSourceChartBuilder({
+  project,
+  existing,
+  onChartChange,
+}: {
+  project: Project;
+  existing: ChartResult | null;
+  onChartChange: (chart: ChartResult) => void;
+}) {
+  const initialSource = project.sources.find((source) => source.id === existing?.source.dataset_id) ?? project.sources[0];
+  const initialCategory = existing?.category_column ?? bestCategoryColumn(initialSource);
+  const [sourceId, setSourceId] = useState(initialSource.id);
+  const [category, setCategory] = useState(initialCategory);
+  const [value, setValue] = useState(existing?.value_column ?? bestMeasureColumn(initialSource));
+  const [aggregation, setAggregation] = useState(existing?.aggregation ?? "sum");
+  const [chartType, setChartType] = useState<ChartResult["chart_type"]>(
+    existing?.chart_type ?? (isTemporalColumn(initialSource.columns.find((column) => column.name === initialCategory)) ? "line" : "bar"),
+  );
+  const [title, setTitle] = useState(existing?.title ?? "Mon graphique");
+  const [result, setResult] = useState<ChartResult | null>(existing);
+  const [calculating, setCalculating] = useState(false);
+  const [error, setError] = useState("");
+  const source = project.sources.find((item) => item.id === sourceId) ?? project.sources[0];
+  const numericColumns = source.columns.filter(isNumericColumn);
+  const categoryColumn = source.columns.find((column) => column.name === category);
+  const allowedChartTypes: ChartResult["chart_type"][] = ["bar", "table"];
+  if (categoryColumn && (isNumericColumn(categoryColumn) || isTemporalColumn(categoryColumn))) allowedChartTypes.splice(1, 0, "line");
+  if (categoryColumn && isNumericColumn(categoryColumn)) allowedChartTypes.splice(-1, 0, "scatter");
+
+  function chooseSource(id: string) {
+    const next = project.sources.find((item) => item.id === id) ?? project.sources[0];
+    const nextCategory = bestCategoryColumn(next);
+    setSourceId(next.id);
+    setCategory(nextCategory);
+    setValue(bestMeasureColumn(next));
+    setChartType(isTemporalColumn(next.columns.find((column) => column.name === nextCategory)) ? "line" : "bar");
+    setTitle(`Graphique · ${next.title}`.slice(0, 160));
+    setResult(null);
+    setError("");
+  }
+
+  function chooseCategory(name: string) {
+    setCategory(name);
+    const selected = source.columns.find((column) => column.name === name);
+    if (chartType === "scatter" && !isNumericColumn(selected)) setChartType("bar");
+    if (chartType === "line" && !isNumericColumn(selected) && !isTemporalColumn(selected)) setChartType("bar");
+  }
+
+  async function calculate() {
+    if (!category || !value) {
+      setError("Choisissez les deux colonnes à représenter.");
+      return;
+    }
+    setCalculating(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(project.id)}/chart`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim() || "Mon graphique",
+          dataset_id: source.id,
+          category_column: category,
+          value_column: value,
+          aggregation,
+          chart_type: chartType,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Le graphique n’a pas pu être calculé.");
+      setResult(body);
+      onChartChange(body);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Le graphique n’a pas pu être calculé.");
+    } finally {
+      setCalculating(false);
+    }
+  }
+
+  return (
+    <section className="single-chart-builder" aria-labelledby="single-chart-title">
+      <div className="analysis-heading">
+        <div>
+          <p className="eyebrow">Analyse libre</p>
+          <h2 id="single-chart-title">Que voulez-vous représenter ?</h2>
+        </div>
+        <p>Les réglages restent accessibles après le calcul : changez une colonne ou un graphique et réessayez.</p>
+      </div>
+
+      <div className="chart-controls">
+        {project.sources.length > 1 && (
+          <label>Document à utiliser
+            <select value={sourceId} onChange={(event) => chooseSource(event.target.value)}>
+              {project.sources.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}
+            </select>
+          </label>
+        )}
+        <label>Colonne de catégories ou axe horizontal
+          <select value={category} onChange={(event) => chooseCategory(event.target.value)}>
+            <option value="">Choisir une colonne</option>
+            {source.columns.map((column) => <option value={column.name} key={column.name}>{column.name} · {translateType(column.type)}</option>)}
+          </select>
+        </label>
+        <ColumnDetails column={categoryColumn} />
+        <label>Colonne de valeurs
+          <select value={value} onChange={(event) => setValue(event.target.value)}>
+            <option value="">Choisir une colonne numérique</option>
+            {numericColumns.filter((column) => column.name !== category).map((column) => <option value={column.name} key={column.name}>{column.name}</option>)}
+          </select>
+        </label>
+        <ColumnDetails column={source.columns.find((column) => column.name === value)} />
+        {chartType !== "scatter" && (
+          <label>Calcul si une catégorie apparaît plusieurs fois
+            <select value={aggregation} onChange={(event) => setAggregation(event.target.value)}>
+              {Object.entries(aggregationLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}
+            </select>
+          </label>
+        )}
+        <label>Titre du graphique
+          <input value={title} maxLength={160} onChange={(event) => setTitle(event.target.value)} />
+        </label>
+      </div>
+
+      <fieldset className="chart-type-choice">
+        <legend>Graphiques adaptés à ces colonnes</legend>
+        {allowedChartTypes.map((type) => (
+          <label className={chartType === type ? "selected" : ""} key={type}>
+            <input type="radio" name="chart-type" checked={chartType === type} onChange={() => setChartType(type)} />
+            <span><strong>{chartTypeLabels[type].title}</strong>{chartTypeLabels[type].detail}</span>
+          </label>
+        ))}
+      </fieldset>
+
+      {error && <p className="error" role="alert">{error}</p>}
+      <button onClick={calculate} disabled={calculating || !category || !value || title.trim().length < 2}>
+        {calculating ? "Création du graphique…" : result ? "Mettre à jour le graphique" : "Créer le graphique"}
+      </button>
+      {result && <SingleChartView chart={result} />}
+    </section>
+  );
+}
+
+function SingleChartView({ chart }: { chart: ChartResult }) {
+  const rows = chart.rows;
+  return (
+    <section className="single-chart-result" aria-labelledby="single-chart-result-title">
+      <div className="indicator-result-heading">
+        <div><p className="eyebrow">Résultat modifiable</p><h3 id="single-chart-result-title">{chart.title}</h3></div>
+        <strong>{chart.result_count.toLocaleString("fr-FR")} résultats</strong>
+      </div>
+      <div className="formula-box"><span>Calcul appliqué, sans compléter les données manquantes</span><code>{chart.formula}</code></div>
+      {chart.warnings.length > 0 && <div className="warnings">{chart.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>}
+      {rows.length === 0 ? <p className="indicator-empty">Aucune valeur numérique exploitable avec ces choix.</p> : (
+        <>
+          {chart.chart_type !== "table" && <SingleChartGraphic chart={chart} />}
+          <details className="indicator-table-details" open={chart.chart_type === "table"}>
+            <summary>{chart.chart_type === "table" ? "Valeurs" : "Voir les valeurs"}</summary>
+            <div className="table-wrap"><table>
+              <thead><tr><th>{chart.category_column}</th><th>{chart.value_column}</th></tr></thead>
+              <tbody>{rows.map((row, index) => <tr key={`${row.label ?? row.x}-${index}`}><td>{row.label ?? formatNumber(row.x!)}</td><td>{formatNumber(row.value ?? row.y!)}</td></tr>)}</tbody>
+            </table></div>
+          </details>
+        </>
+      )}
+      <p className="chart-source-note">Source : {chart.source.title} · empreinte <code>{chart.source.sha256.slice(0, 12)}…</code></p>
+    </section>
+  );
+}
+
+function SingleChartGraphic({ chart }: { chart: ChartResult }) {
+  if (chart.chart_type === "bar") {
+    const rows = chart.rows.slice(0, 15);
+    const maximum = Math.max(...rows.map((row) => Math.abs(row.value ?? 0)), 1);
+    return <figure className="simple-chart"><figcaption>Les 15 premières valeurs de l’aperçu</figcaption>{rows.map((row) => (
+      <div className="simple-bar" key={row.label}><span title={row.label}>{truncateLabel(row.label ?? "", 28)}</span><i style={{ width: `${Math.max(2, Math.abs(row.value ?? 0) / maximum * 100)}%` }} /><strong>{formatNumber(row.value ?? 0)}</strong></div>
+    ))}</figure>;
+  }
+  const rows = chart.rows.slice(0, 50);
+  const points = rows.map((row, index) => ({ x: chart.chart_type === "scatter" ? row.x ?? 0 : index, y: chart.chart_type === "scatter" ? row.y ?? 0 : row.value ?? 0 }));
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const scaleX = (value: number) => 45 + ((value - minX) / (maxX - minX || 1)) * 680;
+  const scaleY = (value: number) => 270 - ((value - minY) / (maxY - minY || 1)) * 225;
+  return (
+    <figure className="single-svg-chart">
+      <figcaption>{chart.chart_type === "scatter" ? "Relation entre les deux colonnes" : "Évolution des valeurs"}</figcaption>
+      <svg viewBox="0 0 760 310" role="img" aria-label={chart.title}>
+        <line x1="45" y1="270" x2="725" y2="270" /><line x1="45" y1="45" x2="45" y2="270" />
+        {chart.chart_type === "line" && <polyline points={points.map((point) => `${scaleX(point.x)},${scaleY(point.y)}`).join(" ")} />}
+        {points.map((point, index) => <circle key={index} cx={scaleX(point.x)} cy={scaleY(point.y)} r={chart.chart_type === "scatter" ? 5 : 4}><title>{formatNumber(point.x)} · {formatNumber(point.y)}</title></circle>)}
+        <text x="45" y="294">{chart.chart_type === "scatter" ? formatNumber(minX) : truncateLabel(chart.rows[0]?.label ?? "", 18)}</text>
+        <text x="725" y="294" textAnchor="end">{chart.chart_type === "scatter" ? formatNumber(maxX) : truncateLabel(chart.rows[rows.length - 1]?.label ?? "", 18)}</text>
+      </svg>
+    </figure>
   );
 }
 
@@ -649,7 +986,7 @@ function ColumnQualification({
     <section className="qualification" aria-labelledby="qualification-title">
       <div className="qualification-heading">
         <div>
-          <p className="eyebrow">Étape 3</p>
+          <p className="eyebrow">Croisement facultatif</p>
           <h2 id="qualification-title">Quelles colonnes désignent le même lieu ?</h2>
         </div>
         <p>Les suggestions sont automatiques. Vérifiez-les à partir des exemples avant de continuer.</p>
@@ -877,7 +1214,7 @@ function IndicatorBuilder({
     <section className="indicator-builder" aria-labelledby="indicator-builder-title">
       <div className="indicator-heading">
         <div>
-          <p className="eyebrow">Étape 4</p>
+          <p className="eyebrow">Calcul croisé</p>
           <h3 id="indicator-builder-title">Construire un indicateur vérifiable</h3>
         </div>
         <p>Choisissez ce qui doit être agrégé dans chaque source, puis la formule qui les relie.</p>
@@ -1336,6 +1673,27 @@ function PublicationComments({ publication }: { publication: PublishedVersion })
 function isNumericMeasure(column: Column, source: ProjectSource) {
   if (column.name === source.dimensions?.commune || column.name === source.dimensions?.année) return false;
   return /^(U?TINYINT|U?SMALLINT|U?INTEGER|U?BIGINT|HUGEINT|FLOAT|DOUBLE|DECIMAL|REAL)/.test(column.type);
+}
+
+function isNumericColumn(column?: Column) {
+  return Boolean(column && /^(U?TINYINT|U?SMALLINT|U?INTEGER|U?BIGINT|HUGEINT|FLOAT|DOUBLE|DECIMAL|REAL)/.test(column.type));
+}
+
+function isTemporalColumn(column?: Column) {
+  if (!column) return false;
+  return column.suggested_roles?.includes("année")
+    || column.type === "DATE"
+    || column.type.startsWith("TIMESTAMP")
+    || /(année|annee|year|date|mois|month|jour|day)/i.test(column.name);
+}
+
+function bestCategoryColumn(source: ProjectSource) {
+  return source.columns.find((column) => column.suggested_roles?.includes("année"))?.name
+    ?? source.columns.find((column) => column.suggested_roles?.includes("commune"))?.name
+    ?? source.columns.find((column) => !isNumericColumn(column) && (column.distinct_count ?? 0) > 1)?.name
+    ?? source.columns.find((column) => column.name !== bestMeasureColumn(source))?.name
+    ?? source.columns[0]?.name
+    ?? "";
 }
 
 function bestMeasureColumn(source: ProjectSource) {

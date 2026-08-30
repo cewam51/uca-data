@@ -27,6 +27,120 @@ OPERATIONS = {
     "ratio_percent": "Rapport en pourcentage",
     "difference": "Différence",
 }
+CHART_TYPES = {"bar", "line", "scatter", "table"}
+
+
+def calculate_single_source_chart(
+    path: Path,
+    category_column: str,
+    value_column: str,
+    aggregation: str,
+    chart_type: str,
+    result_limit: int = 100,
+) -> dict[str, Any]:
+    """Prépare un graphique déterministe à partir de deux colonnes d'un CSV."""
+    if aggregation not in AGGREGATIONS:
+        raise ValueError("Agrégation non autorisée.")
+    if chart_type not in CHART_TYPES:
+        raise ValueError("Type de graphique non autorisé.")
+    if category_column == value_column:
+        raise ValueError("Choisissez deux colonnes différentes.")
+
+    connection = duckdb.connect(":memory:")
+    try:
+        relation = connection.read_csv(str(path), header=True, auto_detect=True)
+        _require_column(relation.columns, category_column)
+        _require_column(relation.columns, value_column)
+        connection.register("source", relation)
+        category = _quote_identifier(category_column)
+        value = _quote_identifier(value_column)
+        numeric_category = f"try_cast({category} AS DOUBLE)"
+        numeric_value = f"try_cast({value} AS DOUBLE)"
+
+        if chart_type == "scatter":
+            valid_count = connection.execute(
+                f"SELECT count(*) FROM source WHERE {numeric_category} IS NOT NULL AND {numeric_value} IS NOT NULL"
+            ).fetchone()[0]
+            rejected_count = connection.execute(
+                f"SELECT count(*) FROM source WHERE {category} IS NOT NULL AND {value} IS NOT NULL "
+                f"AND ({numeric_category} IS NULL OR {numeric_value} IS NULL)"
+            ).fetchone()[0]
+            result_rows = connection.execute(
+                f"""
+                SELECT {numeric_category}, {numeric_value}
+                FROM source
+                WHERE {numeric_category} IS NOT NULL AND {numeric_value} IS NOT NULL
+                ORDER BY {numeric_category}, {numeric_value}
+                LIMIT ?
+                """,
+                [result_limit],
+            ).fetchall()
+            rows = [{"x": _rounded(row[0]), "y": _rounded(row[1])} for row in result_rows]
+            formula = f"Une ligne = « {category_column} » en x et « {value_column} » en y"
+            result_count = valid_count
+        else:
+            aggregate_sql = AGGREGATIONS[aggregation][0]
+            valid_category = f"{category} IS NOT NULL AND trim(CAST({category} AS VARCHAR)) <> ''"
+            result_count = connection.execute(
+                f"""
+                SELECT count(*) FROM (
+                    SELECT CAST({category} AS VARCHAR)
+                    FROM source
+                    WHERE {valid_category} AND {numeric_value} IS NOT NULL
+                    GROUP BY CAST({category} AS VARCHAR)
+                ) groups
+                """
+            ).fetchone()[0]
+            rejected_count = connection.execute(
+                f"SELECT count(*) FROM source WHERE {valid_category} AND {numeric_value} IS NULL"
+            ).fetchone()[0]
+            ordering = (
+                "abs(aggregated_value) DESC, label"
+                if chart_type == "bar"
+                else "try_cast(label AS DOUBLE) NULLS LAST, label"
+            )
+            result_rows = connection.execute(
+                f"""
+                SELECT CAST({category} AS VARCHAR) AS label,
+                       {aggregate_sql}({numeric_value}) AS aggregated_value
+                FROM source
+                WHERE {valid_category}
+                GROUP BY label
+                HAVING count({numeric_value}) > 0
+                ORDER BY {ordering}
+                LIMIT ?
+                """,
+                [result_limit],
+            ).fetchall()
+            rows = [{"label": row[0], "value": _rounded(row[1])} for row in result_rows]
+            formula = (
+                f"{AGGREGATIONS[aggregation][1]} de « {value_column} » "
+                f"pour chaque « {category_column} »"
+            )
+
+        warnings = []
+        if rejected_count:
+            warnings.append(
+                f"{rejected_count} ligne(s) ont été ignorées car une valeur nécessaire n’est pas numérique."
+            )
+        if result_count > result_limit:
+            warnings.append(
+                f"Le calcul contient {result_count} résultats ; cet aperçu en affiche {result_limit}."
+            )
+        return {
+            "chart_type": chart_type,
+            "category_column": category_column,
+            "value_column": value_column,
+            "aggregation": aggregation,
+            "formula": formula,
+            "result_count": result_count,
+            "displayed_count": len(rows),
+            "excluded_rows": rejected_count,
+            "warnings": warnings,
+            "rows": rows,
+        }
+    finally:
+        connection.close()
 
 
 def analyze_csv(path: Path, preview_limit: int = 20) -> dict[str, Any]:

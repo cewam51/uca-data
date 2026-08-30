@@ -47,7 +47,8 @@ class PostgresDatasetRepository:
                     title TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL,
                     join_analysis_json JSONB,
-                    indicator_json JSONB
+                    indicator_json JSONB,
+                    chart_json JSONB
                 )
                 """
             )
@@ -84,6 +85,9 @@ class PostgresDatasetRepository:
             )
             connection.execute(
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS indicator_json JSONB"
+            )
+            connection.execute(
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS chart_json JSONB"
             )
             connection.execute(
                 """
@@ -225,7 +229,7 @@ class PostgresDatasetRepository:
             project = connection.execute(
                 """
                 SELECT p.id, p.title, p.created_at, p.join_analysis_json,
-                       p.indicator_json,
+                       p.indicator_json, p.chart_json,
                        (SELECT count(*) FROM project_versions pv WHERE pv.project_id = p.id)
                 FROM projects p WHERE p.id = %s
                 """,
@@ -273,8 +277,44 @@ class PostgresDatasetRepository:
             "sources": sources,
             "join_analysis": project[3],
             "indicator": project[4],
-            "version_count": project[5],
+            "chart": project[5],
+            "version_count": project[6],
         }
+
+    def remove_project_source(self, project_id: UUID, dataset_id: UUID) -> dict[str, Any]:
+        with psycopg.connect(self.database_url) as connection:
+            rows = connection.execute(
+                "SELECT dataset_id FROM project_sources WHERE project_id = %s ORDER BY position FOR UPDATE",
+                (project_id,),
+            ).fetchall()
+            if not rows:
+                raise LookupError("Projet introuvable.")
+            if dataset_id not in {row[0] for row in rows}:
+                raise LookupError("Source introuvable dans ce projet.")
+            if len(rows) == 1:
+                raise ValueError("Un projet doit conserver au moins un document.")
+            connection.execute(
+                "DELETE FROM project_sources WHERE project_id = %s AND dataset_id = %s",
+                (project_id, dataset_id),
+            )
+            connection.execute(
+                "UPDATE project_sources SET position = 1 WHERE project_id = %s",
+                (project_id,),
+            )
+            connection.execute(
+                """
+                UPDATE projects
+                SET join_analysis_json = NULL,
+                    indicator_json = NULL,
+                    chart_json = CASE
+                        WHEN chart_json->'source'->>'dataset_id' = %s THEN NULL
+                        ELSE chart_json
+                    END
+                WHERE id = %s
+                """,
+                (str(dataset_id), project_id),
+            )
+        return self.get_project(project_id)
 
     def get_project_source_files(self, project_id: UUID) -> list[dict[str, Any]]:
         with psycopg.connect(self.database_url) as connection:
@@ -361,6 +401,15 @@ class PostgresDatasetRepository:
             result = connection.execute(
                 "UPDATE projects SET indicator_json = %s WHERE id = %s",
                 (Jsonb(indicator), project_id),
+            )
+            if result.rowcount == 0:
+                raise LookupError("Projet introuvable.")
+
+    def save_chart(self, project_id: UUID, chart: dict[str, Any]) -> None:
+        with psycopg.connect(self.database_url) as connection:
+            result = connection.execute(
+                "UPDATE projects SET chart_json = %s WHERE id = %s",
+                (Jsonb(chart), project_id),
             )
             if result.rowcount == 0:
                 raise LookupError("Projet introuvable.")

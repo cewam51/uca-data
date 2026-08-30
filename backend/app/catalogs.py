@@ -1,6 +1,7 @@
 import asyncio
 import html
 import re
+import unicodedata
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
@@ -8,6 +9,7 @@ import httpx
 
 
 CatalogSearch = Callable[[httpx.AsyncClient, str, int], Awaitable[list[dict[str, Any]]]]
+INSEE_MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 
 
 async def search_catalogs(query: str, limit: int = 6) -> dict[str, Any]:
@@ -15,6 +17,7 @@ async def search_catalogs(query: str, limit: int = 6) -> dict[str, Any]:
         ("data.gouv.fr", search_data_gouv),
         ("data.europa.eu", search_data_europa),
         ("Recherche Data Gouv", search_recherche_data_gouv),
+        ("Insee", search_insee),
     ]
     timeout = httpx.Timeout(10, connect=5)
     headers = {"User-Agent": "public-data-explorer/0.1"}
@@ -101,6 +104,100 @@ async def search_recherche_data_gouv(
             *(_research_data_gouv_result(client, item) for item in datasets)
         )
     )
+
+
+async def search_insee(
+    client: httpx.AsyncClient, query: str, limit: int
+) -> list[dict[str, Any]]:
+    """Recherche dans le catalogue officiel Melodi et garde les jeux avec un CSV français."""
+    response = await client.get("https://api.insee.fr/melodi/catalog/all")
+    response.raise_for_status()
+    ranked = []
+    for item in response.json():
+        resource = _insee_csv_resource(item)
+        if resource is None:
+            continue
+        title = _localized_content(item.get("title")) or "Jeu de données Insee"
+        subtitle = _localized_content(item.get("subtitle"))
+        description = (
+            _localized_content(item.get("abstract"))
+            or _localized_content(item.get("description"))
+        )
+        score = _insee_search_score(query, title, subtitle, description)
+        if score <= 0:
+            continue
+        identifier = str(item.get("identifier") or "")
+        ranked.append((score, {
+            "id": identifier,
+            "source": "Insee",
+            "title": title,
+            "description": _plain_text(description or subtitle),
+            "publisher": "Institut national de la statistique et des études économiques (Insee)",
+            "updated_at": item.get("modified") or item.get("issued"),
+            "formats": ["CSV"],
+            "license": "Licence Ouverte",
+            "url": f"https://catalogue-donnees.insee.fr/fr/explorateur/{identifier}",
+            "resources": [resource],
+            "can_explore": True,
+        }))
+    ranked.sort(key=lambda entry: (entry[0], entry[1].get("updated_at") or ""), reverse=True)
+    return [item for _, item in ranked[:limit]]
+
+
+def _insee_csv_resource(item: dict[str, Any]) -> dict[str, Any] | None:
+    products = item.get("product") or []
+    candidates = [
+        product for product in products
+        if str(product.get("format") or "").upper() == "CSV"
+        and str(product.get("language") or "").upper() == "FR"
+        and product.get("accessURL")
+        and isinstance(product.get("byteSize"), int)
+        and product["byteSize"] <= INSEE_MAX_ARCHIVE_BYTES
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda product: product.get("modified") or product.get("issued") or "", reverse=True)
+    product = candidates[0]
+    return {
+        "id": product.get("id"),
+        "title": product.get("title") or "Données Insee",
+        "format": "CSV",
+        "url": product.get("accessURL"),
+        "size": product.get("byteSize"),
+        "can_explore": True,
+    }
+
+
+def _insee_search_score(query: str, *values: str) -> int:
+    normalized_query = _normalize_search_text(query)
+    tokens = [token for token in normalized_query.split() if len(token) > 2]
+    if not tokens:
+        tokens = normalized_query.split()
+    fields = [_normalize_search_text(value) for value in values]
+    title = fields[0] if fields else ""
+    score = 20 if normalized_query and normalized_query in title else 0
+    score += sum(8 for token in tokens if token in title)
+    score += sum(3 for token in tokens if any(token in field for field in fields[1:]))
+    return score
+
+
+def _localized_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return str(value.get("content") or value.get("fr") or value.get("en") or "")
+    if not isinstance(value, list):
+        return ""
+    entries = [entry for entry in value if isinstance(entry, dict)]
+    selected = next((entry for entry in entries if entry.get("lang") == "fr"), None)
+    selected = selected or next((entry for entry in entries if entry.get("lang") == "en"), None)
+    return str((selected or {}).get("content") or "")
+
+
+def _normalize_search_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value.lower())
+    without_accents = "".join(character for character in decomposed if not unicodedata.combining(character))
+    return re.sub(r"[^a-z0-9]+", " ", without_accents).strip()
 
 
 async def _research_data_gouv_result(

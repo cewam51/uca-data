@@ -11,6 +11,7 @@ from .catalog_importer import (
     CatalogResourceError,
     import_best_data_europa_resource,
     import_best_data_gouv_resource,
+    import_best_insee_resource,
     import_best_research_data_gouv_resource,
     import_data_gouv_resource,
 )
@@ -62,6 +63,15 @@ class IndicatorCreate(BaseModel):
     sources: list[IndicatorSource] = Field(min_length=2, max_length=2)
 
 
+class ChartCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    dataset_id: UUID
+    category_column: str = Field(min_length=1, max_length=300)
+    value_column: str = Field(min_length=1, max_length=300)
+    aggregation: Literal["sum", "average", "minimum", "maximum", "count"]
+    chart_type: Literal["bar", "line", "scatter", "table"]
+
+
 class PublicationCreate(BaseModel):
     author_name: str = Field(min_length=2, max_length=80)
     title: str = Field(min_length=2, max_length=160)
@@ -87,7 +97,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -134,6 +144,16 @@ def add_project_source(project_id: UUID, payload: ProjectSourceCreate) -> dict:
             payload.source_title.strip(),
             payload.source_publisher.strip() if payload.source_publisher else None,
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.delete("/api/projects/{project_id}/sources/{dataset_id}")
+def remove_project_source(project_id: UUID, dataset_id: UUID) -> dict:
+    try:
+        return repository.remove_project_source(project_id, dataset_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -196,6 +216,27 @@ def create_project_indicator(project_id: UUID, payload: IndicatorCreate) -> dict
                 }
                 for source in payload.sources
             ],
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/chart", status_code=201)
+def create_project_chart(project_id: UUID, payload: ChartCreate) -> dict:
+    title = payload.title.strip()
+    if len(title) < 2:
+        raise HTTPException(status_code=422, detail="Le titre du graphique est trop court.")
+    try:
+        return project_analysis.calculate_chart(
+            project_id,
+            title,
+            payload.dataset_id,
+            payload.category_column.strip(),
+            payload.value_column.strip(),
+            payload.aggregation,
+            payload.chart_type,
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -325,3 +366,20 @@ def explore_best_research_data_gouv_resource(
         raise HTTPException(status_code=502, detail="La plateforme source ne répond pas correctement.") from error
     except Exception as error:
         raise HTTPException(status_code=422, detail="Ces données n’ont pas pu être analysées.") from error
+
+
+@app.post("/api/catalogs/insee/{dataset_id}/explore", status_code=201)
+def explore_best_insee_resource(
+    dataset_id: str,
+    service: CsvUploadService = Depends(get_service),
+) -> dict:
+    try:
+        return import_best_insee_resource(dataset_id, service)
+    except UploadTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except CatalogResourceError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="L’Insee ne répond pas correctement.") from error
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="Ces données Insee n’ont pas pu être analysées.") from error

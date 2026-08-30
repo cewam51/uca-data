@@ -33,10 +33,13 @@ def test_project_can_receive_two_persisted_sources():
     assert "post" in paths["/api/projects/{project_id}/dimensions"]
     assert "post" in paths["/api/projects/{project_id}/join-analysis"]
     assert "post" in paths["/api/projects/{project_id}/indicator"]
+    assert "post" in paths["/api/projects/{project_id}/chart"]
+    assert "delete" in paths["/api/projects/{project_id}/sources/{dataset_id}"]
     assert "get" in paths["/api/projects/{project_id}/versions"]
     assert "post" in paths["/api/projects/{project_id}/versions"]
     assert "get" in paths["/api/publications/{version_id}"]
     assert "post" in paths["/api/publications/{version_id}/comments"]
+    assert "post" in paths["/api/catalogs/insee/{dataset_id}/explore"]
 
 
 def test_upload_keeps_original_and_returns_analysis(tmp_path: Path):
