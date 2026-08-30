@@ -214,6 +214,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [exploring, setExploring] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState("all");
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -248,6 +249,7 @@ export default function Home() {
     const normalized = value.trim();
     if (normalized.length < 2) return;
     setQuery(normalized);
+    setSourceFilter("all");
     setLoading(true);
     setError("");
     setDataset(null);
@@ -409,6 +411,8 @@ export default function Home() {
           exploring={exploring}
           onExplore={explore}
           addingSecond={Boolean(project)}
+          sourceFilter={sourceFilter}
+          onSourceFilterChange={setSourceFilter}
         />
       )}
     </main>
@@ -420,18 +424,25 @@ function SearchResults({
   exploring,
   onExplore,
   addingSecond,
+  sourceFilter,
+  onSourceFilterChange,
 }: {
   search: SearchResponse;
   exploring: string;
   onExplore: (result: SearchResult) => void;
   addingSecond: boolean;
+  sourceFilter: string;
+  onSourceFilterChange: (source: string) => void;
 }) {
+  const filteredResults = sourceFilter === "all"
+    ? search.results
+    : search.results.filter((result) => result.source === sourceFilter);
   return (
     <section className="search-results">
       <div className="results-heading">
         <div>
           <p className="eyebrow">Résultats</p>
-          <h2>{search.total} jeux de données utilisables pour « {search.query} »</h2>
+          <h2>{filteredResults.length} jeux de données {sourceFilter === "all" ? "utilisables" : `sur ${sourceFilter}`} pour « {search.query} »</h2>
         </div>
         <div className="source-status">
           {search.sources.map((source) => (
@@ -441,8 +452,28 @@ function SearchResults({
           ))}
         </div>
       </div>
+      <nav className="source-filters" aria-label="Filtrer les résultats par source">
+        <span>Filtrer par source</span>
+        <button
+          className={sourceFilter === "all" ? "active" : ""}
+          aria-pressed={sourceFilter === "all"}
+          onClick={() => onSourceFilterChange("all")}
+        >
+          Toutes <b>{search.results.length}</b>
+        </button>
+        {search.sources.filter((source) => source.count > 0).map((source) => (
+          <button
+            className={sourceFilter === source.name ? "active" : ""}
+            aria-pressed={sourceFilter === source.name}
+            onClick={() => onSourceFilterChange(source.name)}
+            key={source.name}
+          >
+            {source.name} <b>{source.count}</b>
+          </button>
+        ))}
+      </nav>
       <div className="results-grid">
-        {search.results.map((result) => (
+        {filteredResults.map((result) => (
           <ResultCard
             key={`${result.source}:${result.id}`}
             result={result}
