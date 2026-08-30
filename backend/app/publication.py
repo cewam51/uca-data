@@ -29,6 +29,8 @@ def build_publication_snapshot(
             "catalog_dataset_id": source.get("catalog_dataset_id"),
             "catalog_resource_id": source.get("catalog_resource_id"),
             "source_url": source.get("source_url"),
+            "source_format": source.get("source_format"),
+            "source_sheet": source.get("source_sheet"),
             "sha256": source["sha256"],
             "size_bytes": source["size_bytes"],
             "row_count": source["row_count"],

@@ -23,11 +23,12 @@ Le critère d’acceptation principal exige qu’une recherche publique mène à
 L’utilisateur décrit les données qu’il recherche sans connaître les catalogues, API ou formats sous-jacents. Le système :
 
 - interroge plusieurs catalogues publics ;
-- ouvre directement une fiche de catalogue connue ou un lien public CSV/TSV collé dans la recherche ;
+- ouvre directement une fiche de catalogue connue ou un lien public CSV, TSV ou XLSX collé dans la recherche ;
 - présente les jeux de données et leurs producteurs ;
 - affiche uniquement les résultats contenant une table publique exploitable ou vérifiable ;
 - choisit et télécharge automatiquement la meilleure ressource disponible ;
 - conserve le fichier original et son empreinte SHA-256 ;
+- détecte automatiquement la feuille utile d’un classeur XLSX et indique son nom dans la provenance ;
 - affiche le nombre de lignes, les colonnes, leurs types et un aperçu ;
 - conserve une première source dans un projet et ouvre aussitôt le choix des colonnes ;
 - propose les barres, la courbe, le nuage de points ou le tableau selon les types sélectionnés ;

@@ -16,7 +16,7 @@ class CatalogResourceError(ValueError):
     pass
 
 
-TABULAR_FORMATS = {"CSV", "TSV", "TAB"}
+TABULAR_FORMATS = {"CSV", "TSV", "TAB", "XLSX"}
 
 
 def import_source_url(source_url: str, service: CsvUploadService) -> dict:
@@ -75,18 +75,23 @@ def resolve_catalog_url(value: str) -> tuple[str, str] | None:
 
 
 def import_direct_tabular_url(source_url: str, service: CsvUploadService) -> dict:
-    """Télécharge une URL publique directe si elle contient effectivement un CSV ou TSV."""
+    """Télécharge une URL publique directe si elle contient un CSV, TSV ou XLSX."""
     timeout = httpx.Timeout(30, connect=5)
     headers = {"User-Agent": "public-data-explorer/0.1"}
     with httpx.Client(timeout=timeout, headers=headers) as client:
         parsed = urlparse(source_url)
         path_parts = [unquote(part) for part in parsed.path.split("/") if part]
         suffix = Path(parsed.path).suffix.lower()
-        resource_format = "TSV" if suffix in {".tsv", ".tab"} else "CSV" if suffix == ".csv" else ""
+        resource_format = (
+            "XLSX" if suffix == ".xlsx"
+            else "TSV" if suffix in {".tsv", ".tab"}
+            else "CSV" if suffix == ".csv"
+            else ""
+        )
         name = Path(unquote(parsed.path)).name or "donnees"
-        if suffix not in {".csv", ".tsv", ".tab"} and "datasets" in path_parts:
+        if suffix not in {".csv", ".tsv", ".tab", ".xlsx"} and "datasets" in path_parts:
             dataset_index = path_parts.index("datasets")
-            if len(path_parts) > dataset_index + 1:
+            if len(path_parts) > dataset_index + 1 and path_parts[dataset_index + 1] != "r":
                 name = path_parts[dataset_index + 1]
         with closing(_open_safe_stream(client, source_url)) as response:
             response.raise_for_status()
@@ -96,12 +101,14 @@ def import_direct_tabular_url(source_url: str, service: CsvUploadService) -> dic
                     "Ce lien ouvre une page web. Collez le lien de la fiche d’un catalogue pris en charge ou le lien direct d’un CSV/TSV."
                 )
             if not resource_format:
-                if "tab-separated-values" in content_type or "text/tsv" in content_type:
+                if "spreadsheetml.sheet" in content_type:
+                    resource_format = "XLSX"
+                elif "tab-separated-values" in content_type or "text/tsv" in content_type:
                     resource_format = "TSV"
                 elif "csv" in content_type:
                     resource_format = "CSV"
             if not resource_format:
-                raise CatalogResourceError("Ce lien ne désigne pas une table CSV ou TSV identifiable.")
+                raise CatalogResourceError("Ce lien ne désigne pas une table CSV, TSV ou XLSX identifiable.")
 
             resource = {
                 "id": source_url,
@@ -283,7 +290,7 @@ def _select_best_data_gouv_resource(resources: list[dict]) -> dict:
     candidates = [
         resource
         for resource in resources
-        if str(resource.get("format") or "").upper() == "CSV"
+        if str(resource.get("format") or "").upper() in {"CSV", "XLSX"}
         and resource.get("url")
         and (resource.get("extras") or {}).get("check:available") is not False
     ]
@@ -292,6 +299,7 @@ def _select_best_data_gouv_resource(resources: list[dict]) -> dict:
     candidates.sort(
         key=lambda resource: (
             resource.get("type") == "main",
+            str(resource.get("format") or "").upper() == "CSV",
             resource.get("last_modified") or resource.get("created_at") or "",
         ),
         reverse=True,
@@ -324,7 +332,7 @@ def _data_europa_tabular_resources(distributions: list[dict]) -> list[dict]:
             )
     if not resources:
         raise CatalogResourceError(
-            "Ce jeu de données ne contient pas de table CSV ou TSV directement utilisable."
+            "Ce jeu de données ne contient pas de table CSV, TSV ou XLSX directement utilisable."
         )
     return resources
 
@@ -343,6 +351,11 @@ def _research_data_gouv_tabular_resources(metadata: dict, base_url: str) -> list
             resource_format = "CSV"
         elif content_type == "text/tab-separated-values" or suffix in {".tsv", ".tab"}:
             resource_format = "TSV"
+        elif (
+            content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            or suffix == ".xlsx"
+        ):
+            resource_format = "XLSX"
         else:
             continue
         file_id = data_file.get("id")
@@ -359,7 +372,7 @@ def _research_data_gouv_tabular_resources(metadata: dict, base_url: str) -> list
         )
     if not resources:
         raise CatalogResourceError(
-            "Ce jeu de recherche ne contient aucune table publique CSV ou TSV utilisable."
+            "Ce jeu de recherche ne contient aucune table publique CSV, TSV ou XLSX utilisable."
         )
     resources.sort(
         key=lambda item: (
@@ -498,10 +511,14 @@ def _download_open_response(
             temporary.write(chunk)
         temporary.seek(0)
         name = resource.get("filename") or resource.get("title") or f"{resource_id}"
-        if Path(str(name)).suffix.lower() not in {".csv", ".tsv", ".tab"}:
+        if Path(str(name)).suffix.lower() not in {".csv", ".tsv", ".tab", ".xlsx"}:
             name = f"{name}.{_extension(resource_format)}"
         try:
-            result = service.import_tabular(str(name), temporary)
+            result = (
+                service.import_xlsx(str(name), temporary)
+                if resource_format == "XLSX"
+                else service.import_tabular(str(name), temporary)
+            )
         except UploadTooLargeError:
             raise
         except ValueError as error:
@@ -521,6 +538,8 @@ def _catalog_format(value: object) -> str:
     if isinstance(value, dict):
         value = value.get("id") or value.get("label")
     normalized = str(value or "").upper().replace("TEXT/", "")
+    if "SPREADSHEETML" in normalized or normalized in {"XLSX", "EXCEL XLSX"}:
+        return "XLSX"
     return "TSV" if normalized in {"TAB", "TSV", "TAB-SEPARATED-VALUES"} else normalized
 
 
@@ -541,6 +560,8 @@ def _url_list(value: object) -> list[str]:
 
 
 def _extension(resource_format: str) -> str:
+    if resource_format == "XLSX":
+        return "xlsx"
     return "tsv" if resource_format in {"TSV", "TAB"} else "csv"
 
 

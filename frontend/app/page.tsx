@@ -41,6 +41,8 @@ type Dataset = {
   columns: Column[];
   preview: Record<string, unknown>[];
   catalog_source: string;
+  source_format?: string | null;
+  source_sheet?: string | null;
 };
 
 type ProjectSource = Omit<Dataset, "preview" | "catalog_source"> & {
@@ -187,6 +189,8 @@ type PublishedSource = {
   catalog_dataset_id?: string | null;
   catalog_resource_id?: string | null;
   source_url?: string | null;
+  source_format?: string | null;
+  source_sheet?: string | null;
   sha256: string;
   size_bytes: number;
   row_count: number;
@@ -530,7 +534,7 @@ export default function Home() {
               {loading ? "Ouverture…" : isSourceUrl(query) ? "Ouvrir la source" : "Rechercher"}
             </button>
           </div>
-          <p className="search-hint">Vous pouvez aussi coller directement une fiche data.gouv.fr, data.europa.eu, Recherche Data Gouv ou Insee, ou un lien public CSV/TSV.</p>
+          <p className="search-hint">Vous pouvez aussi coller directement une fiche data.gouv.fr, data.europa.eu, Recherche Data Gouv ou Insee, ou un lien public CSV, TSV ou XLSX.</p>
         </form>
         <div className="examples">
           <span>Exemples</span>
@@ -831,7 +835,7 @@ function ProjectSources({ project, compact = false }: { project: Project; compac
             <div className="source-slot filled" key={source.id}>
               <span>Document {index + 1}</span>
               <strong>{source.title}</strong>
-              <small>{source.publisher ? `${source.publisher} · ` : ""}{source.catalog_source ?? "Source publique"} · {source.row_count.toLocaleString("fr-FR")} lignes</small>
+              <small>{source.publisher ? `${source.publisher} · ` : ""}{source.catalog_source ?? "Source publique"} · {source.row_count.toLocaleString("fr-FR")} lignes{source.source_sheet ? ` · feuille « ${source.source_sheet} »` : ""}</small>
             </div>
           ) : (
             <div className="source-slot" key={`empty-${index}`}>
@@ -1907,6 +1911,8 @@ function PublishedSheet({ publication }: { publication: PublishedVersion }) {
                 <dl>
                   <div><dt>Plateforme</dt><dd>{source.catalog_source || "Non précisée"}</dd></div>
                   <div><dt>Lignes</dt><dd>{source.row_count.toLocaleString("fr-FR")}</dd></div>
+                  {source.source_format && <div><dt>Format original</dt><dd>{source.source_format}</dd></div>}
+                  {source.source_sheet && <div><dt>Feuille</dt><dd>{source.source_sheet}</dd></div>}
                   <div><dt>Commune</dt><dd>{source.dimensions.commune || "—"}</dd></div>
                   <div><dt>Année</dt><dd>{source.dimensions.année || "—"}</dd></div>
                 </dl>

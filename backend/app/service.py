@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from .analyzer import analyze_csv
 from .repository import DatasetRepository
+from .xlsx_converter import convert_xlsx_to_csv
 
 
 class UploadTooLargeError(ValueError):
@@ -59,6 +60,47 @@ class CsvUploadService:
             return result
         except Exception:
             destination.unlink(missing_ok=True)
+            raise
+
+    def import_xlsx(self, original_name: str, stream: BinaryIO) -> dict:
+        if not original_name.lower().endswith(".xlsx"):
+            raise ValueError("Seuls les classeurs Excel XLSX sont acceptés.")
+
+        dataset_id = str(uuid4())
+        original_destination = self.upload_dir / f"{dataset_id}.xlsx"
+        converted_destination = self.upload_dir / f"{dataset_id}.csv"
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        digest = sha256()
+        size_bytes = 0
+
+        try:
+            with original_destination.open("xb") as target:
+                while chunk := stream.read(1024 * 1024):
+                    size_bytes += len(chunk)
+                    if self.max_upload_bytes > 0 and size_bytes > self.max_upload_bytes:
+                        raise UploadTooLargeError(
+                            f"Le fichier dépasse la limite de {self.max_upload_bytes} octets."
+                        )
+                    digest.update(chunk)
+                    target.write(chunk)
+
+            conversion = convert_xlsx_to_csv(original_destination, converted_destination)
+            analysis = analyze_csv(converted_destination)
+            result = {
+                "id": dataset_id,
+                "original_name": Path(original_name).name,
+                "stored_name": converted_destination.name,
+                "sha256": digest.hexdigest(),
+                "size_bytes": size_bytes,
+                "source_format": "XLSX",
+                "source_sheet": conversion["sheet_name"],
+                **analysis,
+            }
+            self.repository.save(result)
+            return result
+        except Exception:
+            original_destination.unlink(missing_ok=True)
+            converted_destination.unlink(missing_ok=True)
             raise
 
     def attach_provenance(self, dataset: dict) -> None:

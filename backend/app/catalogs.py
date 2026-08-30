@@ -261,7 +261,7 @@ def _data_gouv_resource(resource: dict[str, Any]) -> dict[str, Any]:
         "url": resource.get("url"),
         "size": resource.get("filesize"),
         "can_explore": (
-            resource_format == "CSV"
+            resource_format in {"CSV", "XLSX"}
             and bool(resource.get("url"))
             and (resource.get("extras") or {}).get("check:available") is not False
         ),
@@ -276,6 +276,8 @@ def _europa_resource(resource: dict[str, Any]) -> dict[str, Any]:
     if isinstance(resource_urls, str):
         resource_urls = [resource_urls]
     resource_format = str(value or "").upper()
+    if "SPREADSHEETML" in resource_format or resource_format == "EXCEL XLSX":
+        resource_format = "XLSX"
     return {
         "id": resource.get("id"),
         "title": _localized(resource.get("title")) or "Ressource",
@@ -283,7 +285,7 @@ def _europa_resource(resource: dict[str, Any]) -> dict[str, Any]:
         "url": resource_urls[0] if resource_urls else None,
         "size": resource.get("byte_size"),
         "can_explore": (
-            resource_format in {"CSV", "TSV", "TAB"}
+            resource_format in {"CSV", "TSV", "TAB", "XLSX"}
             and bool(resource_urls)
             and not _is_data_europa_landing_page(resource_urls[0])
         ),
@@ -303,6 +305,11 @@ def _research_data_gouv_resources(metadata: dict[str, Any]) -> list[dict[str, An
             resource_format = "CSV"
         elif content_type == "text/tab-separated-values" or filename.lower().endswith((".tsv", ".tab")):
             resource_format = "TSV"
+        elif (
+            content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            or filename.lower().endswith(".xlsx")
+        ):
+            resource_format = "XLSX"
         else:
             continue
         resources.append(

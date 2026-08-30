@@ -220,6 +220,15 @@ def test_automatically_selects_latest_available_main_csv():
     assert selected["id"] == "new"
 
 
+def test_uses_an_xlsx_when_a_data_gouv_dataset_has_no_csv():
+    selected = _select_best_data_gouv_resource([
+        {"id": "pdf", "format": "PDF", "url": "https://example.test/readme.pdf"},
+        {"id": "excel", "format": "XLSX", "url": "https://example.test/data.xlsx"},
+    ])
+
+    assert selected["id"] == "excel"
+
+
 def test_data_europa_prefers_download_url_and_keeps_access_url_as_fallback():
     resources = _data_europa_tabular_resources([{
         "id": "eu-csv",
@@ -233,6 +242,18 @@ def test_data_europa_prefers_download_url_and_keeps_access_url_as_fallback():
         "https://example.test/download.csv",
         "https://example.test/landing",
     ]
+
+
+def test_data_europa_recognizes_the_xlsx_mime_type():
+    resources = _data_europa_tabular_resources([{
+        "id": "eu-xlsx",
+        "title": {"fr": "Classeur"},
+        "format": {"id": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        "download_url": ["https://example.test/data.xlsx"],
+    }])
+
+    assert resources[0]["format"] == "XLSX"
+    assert resources[0]["url"] == "https://example.test/data.xlsx"
 
 
 def test_data_europa_rejects_a_catalog_page_mislabeled_as_csv():
@@ -268,6 +289,23 @@ def test_research_data_gouv_keeps_only_public_tabular_files():
         "url": "https://example.test/api/access/datafile/42",
         "size": 120,
     }]
+
+
+def test_research_data_gouv_recognizes_an_xlsx_file():
+    metadata = {"data": {"latestVersion": {"files": [{
+        "restricted": False,
+        "dataFile": {
+            "id": 55,
+            "filename": "resultats.xlsx",
+            "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "filesize": 456,
+        },
+    }]}}}
+
+    resources = _research_data_gouv_tabular_resources(metadata, "https://example.test")
+
+    assert resources[0]["format"] == "XLSX"
+    assert resources[0]["url"] == "https://example.test/api/access/datafile/55"
 
 
 def test_hides_results_that_cannot_be_used_in_the_project():

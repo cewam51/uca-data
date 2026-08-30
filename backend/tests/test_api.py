@@ -1,6 +1,8 @@
 from io import BytesIO
 from pathlib import Path
 
+from openpyxl import Workbook
+
 from app.main import app
 from app.service import CsvUploadService
 
@@ -81,3 +83,32 @@ def test_imports_a_tab_separated_research_table(tmp_path: Path):
     assert body["row_count"] == 1
     assert body["original_name"] == "communes.tab"
     assert [column["name"] for column in body["columns"]] == ["code", "population"]
+
+
+def test_imports_xlsx_and_keeps_the_original_workbook(tmp_path: Path):
+    workbook = Workbook()
+    cover = workbook.active
+    cover.title = "Présentation"
+    cover.append(["Jeu de données"])
+    cover.append(["Documentation seulement"])
+    data = workbook.create_sheet("Prénoms")
+    data.append(["COMMUNE", "PRENOM", "NOMBRE", "ANNEE"])
+    data.append(["Épinal", "Jules", 10, 2011])
+    data.append(["Épinal", "Léa", 9, 2011])
+    source = BytesIO()
+    workbook.save(source)
+    source.seek(0)
+    original_bytes = source.getvalue()
+    service = CsvUploadService(tmp_path, 0, MemoryRepository())
+
+    body = service.import_xlsx("prenoms.xlsx", source)
+
+    assert body["original_name"] == "prenoms.xlsx"
+    assert body["source_format"] == "XLSX"
+    assert body["source_sheet"] == "Prénoms"
+    assert body["row_count"] == 2
+    assert [column["name"] for column in body["columns"]] == [
+        "COMMUNE", "PRENOM", "NOMBRE", "ANNEE",
+    ]
+    assert (tmp_path / f'{body["id"]}.xlsx').read_bytes() == original_bytes
+    assert (tmp_path / body["stored_name"]).suffix == ".csv"

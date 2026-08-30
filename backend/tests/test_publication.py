@@ -15,6 +15,8 @@ def sample_project():
                 "catalog_dataset_id": "dataset-1",
                 "catalog_resource_id": "resource-1",
                 "source_url": "https://example.test/source.csv",
+                "source_format": "XLSX",
+                "source_sheet": "Données",
                 "sha256": "a" * 64,
                 "size_bytes": 120,
                 "row_count": 2,
@@ -62,6 +64,7 @@ def test_publication_snapshot_contains_provenance_and_reproducibility():
     assert snapshot["version_number"] == 1
     assert snapshot["indicator"]["formula"] == "source 1 ÷ source 2 × 100"
     assert snapshot["sources"][0]["source_url"] == "https://example.test/source.csv"
+    assert snapshot["sources"][0]["source_sheet"] == "Données"
     assert snapshot["reproducibility"]["source_hashes"] == ["a" * 64, "b" * 64]
     assert "Aucune valeur n’est inventée" in snapshot["reproducibility"]["missing_data_policy"]
 

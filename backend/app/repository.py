@@ -141,6 +141,8 @@ class PostgresDatasetRepository:
             "catalog_dataset_id": dataset.get("catalog_dataset_id"),
             "catalog_resource_id": dataset.get("catalog_resource_id"),
             "source_url": dataset.get("source_url"),
+            "source_format": dataset.get("source_format"),
+            "source_sheet": dataset.get("source_sheet"),
         }
         with psycopg.connect(self.database_url) as connection:
             connection.execute(

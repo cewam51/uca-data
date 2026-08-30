@@ -26,7 +26,9 @@ Le parcours principal utilise la table publique `11_02_voitures_traction-ssd` de
 - la liste des projets sépare les projets sans publication, encore en cours, de ceux possédant au moins une version publiée, considérés comme terminés ;
 - chaque projet de la liste peut être rouvert pour poursuivre l’analyse.
 
-Le champ de recherche accepte également une URL. Une fiche data.gouv.fr, data.europa.eu, Recherche Data Gouv ou Insee est résolue directement ; un lien public CSV/TSV est analysé sans passer par une liste de résultats. Les adresses privées et les pages HTML sont refusées.
+Le champ de recherche accepte également une URL. Une fiche data.gouv.fr, data.europa.eu, Recherche Data Gouv ou Insee est résolue directement ; un lien public CSV, TSV ou XLSX est analysé sans passer par une liste de résultats. Les adresses privées et les pages HTML sont refusées.
+
+Le classeur public `liste-prenoms-epinal.xlsx` est validé directement depuis son lien data.gouv.fr : le fichier original de 1,4 Mo est conservé, la feuille `Feuil1` est sélectionnée automatiquement, et ses 15 831 lignes et 6 colonnes sont disponibles pour les graphiques. L’empreinte SHA-256 reste celle du classeur original, pas celle de la conversion interne.
 
 Une recherche `population commune` retourne également des jeux Insee. `DS_POPULATIONS_REFERENCE` est résolu via Melodi, son archive officielle fournit automatiquement `DS_POPULATIONS_REFERENCE_2023_data.csv`, soit 106 065 lignes et 6 colonnes, sans demander de fichier à l’utilisateur.
 
@@ -61,7 +63,7 @@ Les deux ressources sont téléchargées par le backend, sans fichier demandé �
 
 ## Vérifications automatisées
 
-- tests backend : 36 réussis ;
+- tests backend : 40 réussis ;
 - compilation de production frontend et backend : réussie ;
 - analyse statique frontend : réussie ;
 - audit des dépendances frontend : aucune vulnérabilité détectée ;
