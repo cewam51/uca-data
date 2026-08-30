@@ -25,6 +25,6 @@ Une publication copie l’état complet du projet dans un instantané JSONB, num
 
 L’IA peut assister la recherche, proposer des opérations et générer du code. Les téléchargements, empreintes, filtres, jointures, calculs et agrégations doivent rester déterministes.
 
-Le navigateur ne transmet jamais une URL arbitraire à télécharger. Le backend retrouve la ressource dans le catalogue officiel, bloque les destinations réseau privées, applique une limite de taille, conserve l’original puis lance l’analyse.
+Le navigateur ne transmet jamais une URL arbitraire à télécharger. Le backend retrouve la ressource dans le catalogue officiel, bloque les destinations réseau privées, télécharge progressivement la table sur le volume persistant, conserve l’original puis lance l’analyse. Aucune limite de taille applicative n’est activée par défaut ; la capacité réelle est celle du stockage disponible. Un exploitant peut néanmoins définir `MAX_UPLOAD_BYTES` s’il doit imposer son propre quota.
 
-Le connecteur Insee interroge l’API publique Melodi (`/catalog/all`), classe localement les métadonnées françaises selon la recherche, puis résout le produit CSV exact par son identifiant. L’archive ZIP officielle est contrôlée en taille et seul le fichier `*_data.csv` est ouvert ; le fichier de métadonnées voisin n’est jamais confondu avec les observations.
+Le connecteur Insee interroge l’API publique Melodi (`/catalog/all`), classe localement les métadonnées françaises selon la recherche, puis résout le produit CSV exact par son identifiant. Seul le fichier `*_data.csv` de l’archive officielle est décompressé en flux vers le stockage ; le fichier de métadonnées voisin n’est jamais confondu avec les observations.

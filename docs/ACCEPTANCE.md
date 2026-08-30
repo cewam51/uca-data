@@ -1,6 +1,6 @@
 # Vérification du parcours complet
 
-Date de la dernière vérification : 29 août 2026.
+Date de la dernière vérification : 30 août 2026.
 
 ## Scénario principal : un seul document
 
@@ -9,7 +9,7 @@ La recherche `voiture` interroge simultanément les trois catalogues et retourne
 - data.gouv.fr : 6 résultats ;
 - data.europa.eu : 5 résultats ;
 - Recherche Data Gouv : 1 résultat.
-- Insee : catalogue disponible, aucun résultat assez compact pour ce mot-clé ; aucun fichier trop volumineux n’est affiché comme utilisable.
+- Insee : 1 résultat disponible via le catalogue officiel Melodi.
 
 Le parcours principal utilise la table publique `11_02_voitures_traction-ssd` de data.europa.eu. Dès son ajout :
 
@@ -22,6 +22,8 @@ Le parcours principal utilise la table publique `11_02_voitures_traction-ssd` de
 - les colonnes, l’agrégation et le type de graphique restent modifiables après le résultat.
 
 Une recherche `population commune` retourne également des jeux Insee. `DS_POPULATIONS_REFERENCE` est résolu via Melodi, son archive officielle fournit automatiquement `DS_POPULATIONS_REFERENCE_2023_data.csv`, soit 106 065 lignes et 6 colonnes, sans demander de fichier à l’utilisateur.
+
+Le fichier Insee `DS_PRENOM`, auparavant exclu par la limite du prototype, est également validé : 6 622 949 observations et un CSV décompressé de 303 594 337 octets sont téléchargés, conservés et analysés en flux en moins de 15 secondes sur l’environnement de vérification.
 
 ## Scénario facultatif : deux documents
 

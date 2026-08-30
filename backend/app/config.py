@@ -10,7 +10,8 @@ class Settings:
         "postgresql://uca:uca@localhost:5432/uca",
     )
     upload_dir: Path = Path(os.getenv("UPLOAD_DIR", "uploads"))
-    max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
+    # 0 signifie : aucune limite applicative. La capacité dépend alors du volume de stockage.
+    max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", "0"))
 
 
 settings = Settings()

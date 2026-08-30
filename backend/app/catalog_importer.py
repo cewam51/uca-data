@@ -132,7 +132,7 @@ def _download_and_import_insee_archive(
     with closing(_open_safe_stream(client, source_url)) as response:
         response.raise_for_status()
         declared_size = int(response.headers.get("content-length") or 0)
-        if declared_size > service.max_upload_bytes:
+        if service.max_upload_bytes > 0 and declared_size > service.max_upload_bytes:
             limit_mb = service.max_upload_bytes // (1024 * 1024)
             raise UploadTooLargeError(
                 f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
@@ -141,7 +141,7 @@ def _download_and_import_insee_archive(
             downloaded = 0
             for chunk in response.iter_bytes(1024 * 1024):
                 downloaded += len(chunk)
-                if downloaded > service.max_upload_bytes:
+                if service.max_upload_bytes > 0 and downloaded > service.max_upload_bytes:
                     raise UploadTooLargeError("L’archive Insee dépasse la taille maximale autorisée.")
                 archive_file.write(chunk)
             archive_file.seek(0)
@@ -168,20 +168,13 @@ def _import_insee_archive(archive_file, service: CsvUploadService) -> dict:
             entry = (preferred or csv_entries)[0] if (preferred or csv_entries) else None
             if entry is None:
                 raise CatalogResourceError("L’archive Insee ne contient pas de table de données CSV.")
-            if entry.file_size > service.max_upload_bytes:
+            if service.max_upload_bytes > 0 and entry.file_size > service.max_upload_bytes:
                 limit_mb = service.max_upload_bytes // (1024 * 1024)
                 raise UploadTooLargeError(
                     f"La table Insee décompressée dépasse la capacité du prototype ({limit_mb} Mo)."
                 )
-            with archive.open(entry) as source, SpooledTemporaryFile(max_size=8 * 1024 * 1024) as table:
-                copied = 0
-                while chunk := source.read(1024 * 1024):
-                    copied += len(chunk)
-                    if copied > service.max_upload_bytes:
-                        raise UploadTooLargeError("La table Insee dépasse la taille maximale autorisée.")
-                    table.write(chunk)
-                table.seek(0)
-                return service.import_tabular(Path(entry.filename).name, table)
+            with archive.open(entry) as source:
+                return service.import_tabular(Path(entry.filename).name, source)
     except BadZipFile as error:
         raise CatalogResourceError("L’archive fournie par l’Insee n’est pas lisible.") from error
 
@@ -367,7 +360,7 @@ def _download_and_import(
                 "La plateforme annonce une table mais renvoie seulement une page de présentation."
             )
         declared_size = int(response.headers.get("content-length") or 0)
-        if declared_size > service.max_upload_bytes:
+        if service.max_upload_bytes > 0 and declared_size > service.max_upload_bytes:
             limit_mb = service.max_upload_bytes // (1024 * 1024)
             raise UploadTooLargeError(
                 f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."
@@ -377,7 +370,7 @@ def _download_and_import(
             downloaded = 0
             for chunk in response.iter_bytes(1024 * 1024):
                 downloaded += len(chunk)
-                if downloaded > service.max_upload_bytes:
+                if service.max_upload_bytes > 0 and downloaded > service.max_upload_bytes:
                     limit_mb = service.max_upload_bytes // (1024 * 1024)
                     raise UploadTooLargeError(
                         f"Ce jeu de données dépasse encore la capacité du prototype ({limit_mb} Mo)."

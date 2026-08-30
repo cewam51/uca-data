@@ -42,7 +42,7 @@ def test_searches_official_insee_catalog_and_keeps_french_csv():
                 "format": "CSV",
                 "language": "FR",
                 "accessURL": "https://api.insee.fr/melodi/file/test",
-                "byteSize": 123,
+                "byteSize": 900_000_000,
             }],
         }])
 
@@ -55,6 +55,7 @@ def test_searches_official_insee_catalog_and_keeps_french_csv():
     assert result["source"] == "Insee"
     assert result["formats"] == ["CSV"]
     assert result["can_explore"] is True
+    assert result["resources"][0]["size"] == 900_000_000
 
 
 def test_imports_data_csv_from_insee_zip_without_using_metadata_file(tmp_path):

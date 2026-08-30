@@ -39,7 +39,7 @@ class CsvUploadService:
             with destination.open("xb") as target:
                 while chunk := stream.read(1024 * 1024):
                     size_bytes += len(chunk)
-                    if size_bytes > self.max_upload_bytes:
+                    if self.max_upload_bytes > 0 and size_bytes > self.max_upload_bytes:
                         raise UploadTooLargeError(
                             f"Le fichier dépasse la limite de {self.max_upload_bytes} octets."
                         )

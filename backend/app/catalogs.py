@@ -9,7 +9,6 @@ import httpx
 
 
 CatalogSearch = Callable[[httpx.AsyncClient, str, int], Awaitable[list[dict[str, Any]]]]
-INSEE_MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 
 
 async def search_catalogs(query: str, limit: int = 6) -> dict[str, Any]:
@@ -151,8 +150,6 @@ def _insee_csv_resource(item: dict[str, Any]) -> dict[str, Any] | None:
         if str(product.get("format") or "").upper() == "CSV"
         and str(product.get("language") or "").upper() == "FR"
         and product.get("accessURL")
-        and isinstance(product.get("byteSize"), int)
-        and product["byteSize"] <= INSEE_MAX_ARCHIVE_BYTES
     ]
     if not candidates:
         return None

@@ -18,7 +18,7 @@ services:
     environment:
       DATABASE_URL: postgresql://uca:uca@postgres:5432/uca
       UPLOAD_DIR: /data/uploads
-      MAX_UPLOAD_BYTES: 262144000
+      MAX_UPLOAD_BYTES: 0
     volumes:
       - uploads:/data/uploads
     ports:
